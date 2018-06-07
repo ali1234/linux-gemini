@@ -1,4 +1,17 @@
 /*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
+/*
  * Header files for basic KREE functions.
  */
 
@@ -24,6 +37,16 @@ typedef uint32_t KREE_SHAREDMEM_HANDLE;
  * @return return code
  */
 TZ_RESULT KREE_CreateSession(const char *ta_uuid, KREE_SESSION_HANDLE *pHandle);
+
+/**
+ *  Create a new TEE sesssion with tag for debug purpose
+ *
+ * @param ta_uuid UUID of the TA to connect to.
+ * @param pHandle Handle for the new session. Return KREE_SESSION_HANDLE_FAIL if fail.
+ * @param tag string can be printed when querying memory usage.
+ * @return return code
+ */
+TZ_RESULT KREE_CreateSessionWithTag(const char *ta_uuid, KREE_SESSION_HANDLE *pHandle, const char *tag);
 
 /**
  * Close TEE session

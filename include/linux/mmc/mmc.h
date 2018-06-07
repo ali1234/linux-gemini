@@ -53,11 +53,6 @@
 #define MMC_SEND_TUNING_BLOCK    19   /* adtc                    R1  */
 #define MMC_SEND_TUNING_BLOCK_HS200	21	/* adtc R1  */
 
-#define MMC_TUNING_BLK_PATTERN_4BIT_SIZE	 64
-#define MMC_TUNING_BLK_PATTERN_8BIT_SIZE	128
-extern const u8 tuning_blk_pattern_4bit[MMC_TUNING_BLK_PATTERN_4BIT_SIZE];
-extern const u8 tuning_blk_pattern_8bit[MMC_TUNING_BLK_PATTERN_8BIT_SIZE];
-
   /* class 3 */
 #define MMC_WRITE_DAT_UNTIL_STOP 20   /* adtc [31:0] data addr   R1  */
 
@@ -88,6 +83,13 @@ extern const u8 tuning_blk_pattern_8bit[MMC_TUNING_BLK_PATTERN_8BIT_SIZE];
   /* class 8 */
 #define MMC_APP_CMD              55   /* ac   [31:16] RCA        R1  */
 #define MMC_GEN_CMD              56   /* adtc [0] RD/WR          R1  */
+
+  /* class 11 */
+#define MMC_SET_QUEUE_CONTEXT    44   /* ac   [31:0] data addr   R1  */
+#define MMC_QUEUE_READ_ADDRESS   45   /* ac   [31:0] data addr   R1  */
+#define MMC_READ_REQUESTED_QUEUE 46   /* adtc                    R1  */
+#define MMC_WRITE_REQUESTED_QUEUE 47  /* adtc                    R1  */
+#define MMC_CMDQ_TASK_MGMT       48   /* ac                      R1b */
 
 static inline bool mmc_op_multi(u32 opcode)
 {
@@ -318,6 +320,7 @@ struct _mmc_csd {
 #define EXT_CSD_PWR_CL_52_360		202	/* RO */
 #define EXT_CSD_PWR_CL_26_360		203	/* RO */
 #define EXT_CSD_SEC_CNT			212	/* RO, 4 bytes */
+#define EXT_CSD_SLEEP_NOTIFICATION_TIME	216	/* RO */
 #define EXT_CSD_S_A_TIMEOUT		217	/* RO */
 #define EXT_CSD_REL_WR_SEC_C		222	/* RO */
 #define EXT_CSD_HC_WP_GRP_SIZE		221	/* RO */
@@ -417,6 +420,7 @@ struct _mmc_csd {
 #define EXT_CSD_POWER_ON		1
 #define EXT_CSD_POWER_OFF_SHORT		2
 #define EXT_CSD_POWER_OFF_LONG		3
+#define EXT_CSD_SLEEP_NOTIFICATION	4	/* eMMC reversion after v5.0 */
 
 #define EXT_CSD_PWR_CL_8BIT_MASK	0xF0	/* 8 bit PWR CLS */
 #define EXT_CSD_PWR_CL_4BIT_MASK	0x0F	/* 8 bit PWR CLS */

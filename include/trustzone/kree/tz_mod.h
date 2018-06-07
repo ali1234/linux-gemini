@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef TZ_MOD_H
 #define TZ_MOD_H
 
@@ -23,6 +36,10 @@
 		_IOWR(MTEE_IOC_MAGIC,  4, struct kree_tee_service_cmd_param)
 #define MTEE_CMD_SHM_UNREG \
 		_IOWR(MTEE_IOC_MAGIC,  5, struct kree_tee_service_cmd_param)
+#define MTEE_CMD_SHM_REG_WITH_TAG \
+		_IOWR(MTEE_IOC_MAGIC,  6, struct kree_tee_service_cmd_param)
+#define MTEE_CMD_OPEN_SESSION_WITH_TAG \
+		_IOWR(MTEE_IOC_MAGIC,  7, struct kree_session_tag_cmd_param)
 
 
 #define DEV_IOC_MAXNR       (10)
@@ -32,6 +49,15 @@ struct kree_session_cmd_param {
 	int32_t ret;
 	int32_t handle;
 	uint64_t data;
+};
+
+/* param for open/close session with tag information */
+struct kree_session_tag_cmd_param {
+	int32_t ret;
+	int32_t handle;
+	uint64_t data;
+	uint64_t tag;
+	uint32_t tag_size;
 };
 
 /* param for tee service call */
@@ -54,5 +80,17 @@ struct kree_sharedmemory_cmd_param {
 	uint32_t control;	/* 0 = write, 1 = read only */
 };
 
+/* param for shared memory with tag information */
+struct kree_sharedmemory_tag_cmd_param {
+	int32_t ret;
+	uint32_t session;
+	uint32_t mem_handle;
+	uint32_t command;
+	uint64_t buffer;
+	uint32_t size;
+	uint32_t control;	/* 0 = write, 1 = read only */
+	uint64_t tag;
+	uint32_t tag_size;
+};
 
 #endif				/* end of DEVFINO_H */

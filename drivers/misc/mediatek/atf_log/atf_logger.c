@@ -1,4 +1,16 @@
-#define DEBUG
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/module.h>
 #include <linux/file.h>
 #include <linux/fs.h>
@@ -7,18 +19,25 @@
 #include <linux/kernel.h>       /* min() */
 #include <linux/uaccess.h>      /* copy_to_user() */
 #include <linux/sched.h>        /* TASK_INTERRUPTIBLE/signal_pending/schedule */
+#include <linux/syscore_ops.h>
 #include <linux/poll.h>
 #include <linux/io.h>           /* ioremap() */
 #include <linux/of_fdt.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/of_irq.h>
+#include <linux/of.h>
 #include <linux/seq_file.h>
 #include <asm/setup.h>
 #include <linux/interrupt.h>
 #include <linux/proc_fs.h>
 #include <linux/atomic.h>
+#include <linux/irq.h>
+#include <mach/mt_secure_api.h>
 
 /*#define ATF_LOGGER_DEBUG*/
 #define ATF_LOG_CTRL_BUF_SIZE 256
 #define ATF_CRASH_MAGIC_NO	0xdead1abf
+#define ATF_LAST_MAGIC_NO	0x41544641
 /*#define atf_log_lock()        atomic_inc(&(atf_buf_vir_ctl->info.atf_buf_lock))*/
 /*#define atf_log_unlock()      atomic_dec(&(atf_buf_vir_ctl->info.atf_buf_lock))*/
 
@@ -78,6 +97,11 @@ unsigned int atf_log_len;
 unsigned int write_index;
 unsigned int read_index;
 
+#ifdef CONFIG_ARCH_MT6797
+phys_addr_t atf_dump_buff_add = 0x44610000;
+unsigned int atf_dump_buff_size = 0x30000;
+#endif
+
 static unsigned int pos_to_index(unsigned int pos)
 {
 	return pos - (atf_buf_phy_ctl + ATF_LOG_CTRL_BUF_SIZE);
@@ -87,38 +111,6 @@ static unsigned int index_to_pos(unsigned int index)
 {
 	return (atf_buf_phy_ctl + ATF_LOG_CTRL_BUF_SIZE) + index;
 }
-#if 0
-static size_t atf_log_dump_nolock(unsigned char *buffer, unsigned int start, size_t size)
-{
-	unsigned int len;
-	unsigned int least;
-	size_t skip = 0;
-	unsigned char *p = atf_log_vir_addr + start;
-
-	write_index = pos_to_index(atf_buf_vir_ctl->info.atf_write_pos);
-	least = (write_index + atf_buf_len - start) % atf_buf_len;
-	if (size > least)
-		size = least;
-	len = min(size, atf_log_len - start);
-	if (size == len) {
-		memcpy(buffer, atf_log_vir_addr + start, size);
-	} else {
-		size_t right = atf_log_len - start;
-
-		while (skip < right) {
-			if (*p != 0)
-				break;
-			p++;
-			skip++;
-		}
-		/* pr_notice("skip:%d, right:%d, %p\n", skip, right, p); */
-		memcpy(buffer, p, right - skip);
-		memcpy(buffer, atf_log_vir_addr, size - right);
-		return size - skip;
-	}
-	return size;
-}
-#endif
 
 static size_t atf_log_dump_nolock(unsigned char *buffer, struct ipanic_atf_log_rec *rec, size_t size)
 {
@@ -333,6 +325,7 @@ long atf_log_ioctl(struct file *flip, unsigned int cmd, unsigned long arg)
 static const struct file_operations atf_log_fops = {
 	.owner      = THIS_MODULE,
 	.unlocked_ioctl = atf_log_ioctl,
+	.compat_ioctl = atf_log_ioctl,
 	.poll       = atf_log_poll,
 	.read       = atf_log_read,
 	.open       = atf_log_open,
@@ -481,8 +474,6 @@ static irqreturn_t ATF_log_irq_handler(int irq, void *dev_id)
 {
 	if (!atf_buf_vir_ctl->info.atf_reader_alive)
 		pr_err("No alive reader, but still receive irq\n");
-	else
-		pr_info("ATF_log_irq triggered!\n");
 	wake_up_interruptible(&atf_log_wq);
 	return IRQ_HANDLED;
 }
@@ -492,6 +483,7 @@ static const struct file_operations proc_atf_log_file_operations = {
 	.open   = atf_log_open,
 	.read   = atf_log_read,
 	.unlocked_ioctl = atf_log_ioctl,
+	.compat_ioctl = atf_log_ioctl,
 	.release = atf_log_release,
 	.poll   = atf_log_poll,
 };
@@ -515,14 +507,65 @@ static const struct file_operations proc_atf_crash_file_operations = {
 	.release = single_release,
 };
 
-static struct proc_dir_entry *atf_log_proc_dir;
-static struct proc_dir_entry *atf_log_proc_file;
-static struct proc_dir_entry *atf_crash_proc_file;
+#ifdef MTK_SIP_KERNEL_TIME_SYNC
+static void atf_time_sync_resume(void)
+{
+	/* Get local_clock and sync to ATF */
+	u64 time_to_sync = local_clock();
 
+#ifdef CONFIG_ARM64
+	mt_secure_call(MTK_SIP_KERNEL_TIME_SYNC, time_to_sync, 0, 0);
+#else
+	mt_secure_call(MTK_SIP_KERNEL_TIME_SYNC, (u32)time_to_sync, (u32)(time_to_sync >> 32), 0);
+#endif
+	pr_notice("atf_time_sync: resume sync");
+}
+
+static struct syscore_ops atf_time_sync_syscore_ops = {
+	.resume = atf_time_sync_resume,
+};
+#endif
+
+#ifdef CONFIG_ARCH_MT6797
+
+static int atf_dump_show(struct seq_file *m, void *v)
+{
+	void *buff;
+
+	buff = ioremap_wc(atf_dump_buff_add, atf_dump_buff_size);
+	seq_write(m, buff, atf_dump_buff_size);
+	return 0;
+}
+
+static int atf_dump_file_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, atf_dump_show, inode->i_private);
+}
+
+static const struct file_operations proc_atf_dump_log_file_operations = {
+	.owner = THIS_MODULE,
+	.open = atf_dump_file_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+#endif
 static int __init atf_log_init(void)
 {
 	/* register module driver */
 	int err;
+	struct proc_dir_entry *atf_log_proc_dir;
+	struct proc_dir_entry *atf_log_proc_file;
+	struct device_node *node = NULL;
+	int irq_num;
+#ifdef CONFIG_ARCH_MT6797
+	struct proc_dir_entry *atf_log_dump_proc_file;
+#endif
+	struct proc_dir_entry *atf_crash_proc_file;
+	struct proc_dir_entry *atf_last_proc_file;
+#ifdef MTK_SIP_KERNEL_TIME_SYNC
+	u64 time_to_sync;
+#endif
 
 	err = misc_register(&atf_log_dev);
 	if (unlikely(err)) {
@@ -552,10 +595,21 @@ static int __init atf_log_init(void)
 	atf_buf_vir_ctl->info.atf_read_seq = 0;
 	/* initial wait queue */
 	init_waitqueue_head(&atf_log_wq);
-	if (request_irq(281, (irq_handler_t)ATF_log_irq_handler, IRQF_TRIGGER_NONE, "ATF_irq", NULL) != 0) {
+
+	node = of_find_compatible_node(NULL, NULL, "mediatek,atf_logger");
+	if (!node) {
+		pr_err("[SCP] Can't find node:mediatek,atf_logger.n");
+		return -1;
+	}
+
+	irq_num = irq_of_parse_and_map(node, 0);
+	pr_notice("atf irq num %d.\n", irq_num);
+
+	if (request_irq(irq_num, (irq_handler_t)ATF_log_irq_handler, IRQF_TRIGGER_NONE, "ATF_irq", NULL) != 0) {
 		pr_crit("Fail to request ATF_log_irq interrupt!\n");
 		return -1;
 	}
+
 	/* create /proc/atf_log */
 	atf_log_proc_dir = proc_mkdir("atf_log", NULL);
 	if (atf_log_proc_dir == NULL) {
@@ -568,6 +622,15 @@ static int __init atf_log_init(void)
 		pr_err("atf_log proc_create failed at atf_log\n");
 		return -ENOMEM;
 	}
+#ifdef CONFIG_ARCH_MT6797
+/* create /proc/atf_log/atf_dump_log */
+	atf_log_dump_proc_file = proc_create("atf_dump_log", 0444, atf_log_proc_dir,
+	&proc_atf_dump_log_file_operations);
+	if (atf_log_dump_proc_file == NULL) {
+		pr_err("atf_log proc_create failed at atf_dump_log\n");
+		return -ENOMEM;
+	}
+#endif
 
 	if (atf_buf_vir_ctl->info.atf_crash_flag == ATF_CRASH_MAGIC_NO) {
 		atf_crash_proc_file = proc_create("atf_crash", 0444, atf_log_proc_dir, &proc_atf_crash_file_operations);
@@ -575,10 +638,32 @@ static int __init atf_log_init(void)
 			pr_err("atf_log proc_create failed at atf_crash\n");
 			return -ENOMEM;
 		}
-		atf_buf_vir_ctl->info.atf_crash_flag = 0;
+		atf_buf_vir_ctl->info.atf_crash_flag = ATF_LAST_MAGIC_NO;
+		atf_crash_log_buf = ioremap_wc(atf_buf_vir_ctl->info.atf_crash_log_addr,
+				atf_buf_vir_ctl->info.atf_crash_log_size);
+	} else if (atf_buf_vir_ctl->info.atf_crash_flag == ATF_LAST_MAGIC_NO) {
+		atf_last_proc_file = proc_create("atf_last", 0444, atf_log_proc_dir, &proc_atf_crash_file_operations);
+		if (atf_last_proc_file == NULL) {
+			pr_err("atf_log proc_create failed at atf_last\n");
+			return -ENOMEM;
+		}
 		atf_crash_log_buf = ioremap_wc(atf_buf_vir_ctl->info.atf_crash_log_addr,
 				atf_buf_vir_ctl->info.atf_crash_log_size);
 	}
+
+#ifdef MTK_SIP_KERNEL_TIME_SYNC
+	register_syscore_ops(&atf_time_sync_syscore_ops);
+
+	/* Get local_clock and sync to ATF */
+	time_to_sync = local_clock();
+
+#ifdef CONFIG_ARM64
+	mt_secure_call(MTK_SIP_KERNEL_TIME_SYNC, time_to_sync, 0, 0);
+#else
+	mt_secure_call(MTK_SIP_KERNEL_TIME_SYNC, (u32)time_to_sync, (u32)(time_to_sync >> 32), 0);
+#endif
+	pr_notice("atf_time_sync: inited");
+#endif
 
 	return 0;
 }

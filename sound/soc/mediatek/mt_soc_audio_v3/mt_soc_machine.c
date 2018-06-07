@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -121,13 +123,13 @@ static struct dentry *mt_sco_audio_debugfs;
 
 static int mtmachine_startup(struct snd_pcm_substream *substream)
 {
-	/* printk("mtmachine_startup\n"); */
+	/* pr_debug("mtmachine_startup\n"); */
 	return 0;
 }
 
 static int mtmachine_prepare(struct snd_pcm_substream *substream)
 {
-	/* printk("mtmachine_prepare\n"); */
+	/* pr_debug("mtmachine_prepare\n"); */
 	return 0;
 }
 
@@ -147,13 +149,13 @@ static struct snd_soc_compr_ops mt_machine_audio_compr_ops = {
 
 static int mtmachine_startupmedia2(struct snd_pcm_substream *substream)
 {
-	/* printk("mtmachine_startupmedia2\n"); */
+	/* pr_debug("mtmachine_startupmedia2\n"); */
 	return 0;
 }
 
 static int mtmachine_preparemedia2(struct snd_pcm_substream *substream)
 {
-	/* printk("mtmachine_preparemedia2\n"); */
+	/* pr_debug("mtmachine_preparemedia2\n"); */
 	return 0;
 }
 
@@ -437,6 +439,36 @@ static ssize_t mt_soc_debug_read(struct file *file, char __user *buf, size_t cou
 		       Afe_Get_Reg(AUDIO_TOP_CON2));
 	n += scnprintf(buffer + n, size - n, "AUDIO_TOP_CON3		   = 0x%x\n",
 		       Afe_Get_Reg(AUDIO_TOP_CON3));
+	n += scnprintf(buffer + n, size - n, "AFE_BUS_MON1		   = 0x%x\n",
+			Afe_Get_Reg(AFE_BUS_MON1));
+	n += scnprintf(buffer + n, size - n, "AFE_CONN_MON0		   = 0x%x\n",
+		Afe_Get_Reg(AFE_CONN_MON0));
+	n += scnprintf(buffer + n, size - n, "AFE_CONN_MON1		   = 0x%x\n",
+		Afe_Get_Reg(AFE_CONN_MON1));
+	n += scnprintf(buffer + n, size - n, "AFE_CONN_MON2		   = 0x%x\n",
+		Afe_Get_Reg(AFE_CONN_MON2));
+	n += scnprintf(buffer + n, size - n, "AFE_CONN_MON3		   = 0x%x\n",
+		Afe_Get_Reg(AFE_CONN_MON3));
+	n += scnprintf(buffer + n, size - n, "AFE_APB_MON		   = 0x%x\n",
+		Afe_Get_Reg(AFE_APB_MON));
+	n += scnprintf(buffer + n, size - n, "CLK_MISC_CFG_0  = 0x%x\n",
+		GetClkCfg(CLK_MISC_CFG_0));
+	n += scnprintf(buffer + n, size - n, "AUDIO_CLK_CFG_4  = 0x%x\n",
+		GetClkCfg(AUDIO_CLK_CFG_4));
+	n += scnprintf(buffer + n, size - n, "AUDIO_CLK_CFG_6  = 0x%x\n",
+		GetClkCfg(AUDIO_CLK_CFG_6));
+	n += scnprintf(buffer + n, size - n, "APLL1_CON0  = 0x%x\n",
+		GetpllCfg(APLL1_CON0));
+	n += scnprintf(buffer + n, size - n, "APLL1_CON1  = 0x%x\n",
+		GetpllCfg(APLL1_CON1));
+	n += scnprintf(buffer + n, size - n, "APLL1_CON2  = 0x%x\n",
+		GetpllCfg(APLL1_CON2));
+	n += scnprintf(buffer + n, size - n, "APLL1_CON3  = 0x%x\n",
+		GetpllCfg(APLL1_CON3));
+	n += scnprintf(buffer + n, size - n, "APLL1_PWR_CON0  = 0x%x\n",
+		GetpllCfg(APLL1_PWR_CON0));
+	n += scnprintf(buffer + n, size - n, "INFRA_GLOBALCON_PDN0  = 0x%x\n",
+		GetInfraCfg(INFRA_GLOBALCON_PDN0));
 	n += scnprintf(buffer + n, size - n, "AFE_DAC_CON0		   = 0x%x\n",
 		       Afe_Get_Reg(AFE_DAC_CON0));
 	n += scnprintf(buffer + n, size - n, "AFE_DAC_CON1		   = 0x%x\n",
@@ -767,6 +799,10 @@ static ssize_t mt_soc_debug_write(struct file *f, const char __user *buf,
 	char delim[] = " ,";
 
 	memset((void *)InputString, 0, 256);
+
+	if (count > 256)
+		count = 256;
+
 	if (copy_from_user((InputString), buf, count))
 		pr_debug("copy_from_user mt_soc_debug_write count = %zu temp = %s\n", count,
 			 InputString);

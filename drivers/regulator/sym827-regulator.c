@@ -80,7 +80,7 @@ static int sym827_hw_component_detect(struct sym827 *chip)
 	/* check default SPEC. value */
 	if (val != 0x04) {
 		pr_err("%s: SYM827_REG_ID_1 wrong: %x\n", __func__, val);
-		return ret;
+		return -ENODEV;
 	}
 
 	ret = regmap_read(chip->regmap, SYM827_REG_ID_1, &val);
@@ -139,7 +139,7 @@ static unsigned int sym827_buck_get_mode(struct regulator_dev *rdev)
 	if (ret < 0)
 		return ret;
 	mode = 0;
-	switch (data & SYM827_BUCK_MODE_MASK) {
+	switch ((data & SYM827_BUCK_MODE_MASK) >> 6) {
 	case SYM827_BUCK_MODE_PWM:
 		mode = REGULATOR_MODE_FAST;
 		break;
@@ -309,6 +309,7 @@ static struct regulator_desc sym827_reg = {
 static int sym827_regulator_init(struct sym827 *chip)
 {
 	struct regulator_config config = {};
+	struct regulation_constraints *c;
 	int ret;
 	unsigned int data;
 
@@ -322,9 +323,8 @@ static int sym827_regulator_init(struct sym827 *chip)
 	if (ret)
 		return ret;
 #endif
-	if (chip->pdata)
-		config.init_data = chip->pdata->init_data;
 
+	config.init_data = chip->pdata->init_data;
 	config.dev = chip->dev;
 	config.driver_data = chip;
 	config.of_node = chip->pdata->reg_node;
@@ -337,6 +337,14 @@ static int sym827_regulator_init(struct sym827 *chip)
 		ret = PTR_ERR(chip->rdev);
 		goto err_regulator;
 	}
+
+	/* Constrain board-specific capabilities according to what
+	 * this driver and the chip itself can actually do.
+	 */
+	c = chip->rdev->constraints;
+	c->valid_modes_mask |= REGULATOR_MODE_NORMAL |
+	REGULATOR_MODE_STANDBY | REGULATOR_MODE_FAST;
+	c->valid_ops_mask |= REGULATOR_CHANGE_MODE;
 
 	return 0;
 
@@ -400,7 +408,7 @@ static struct sym827_pdata *of_get_sym827_platform_data(struct device *dev)
 	ret = of_get_named_gpio(node, "en-gpio", 0);
 	if (ret >= 0) {
 		pdata->gpio_en = ret;
-		gpio_request(pdata->gpio_en, "sym827_gpio_en");
+		ret = gpio_request(pdata->gpio_en, "sym827_gpio_en");
 		if (ret)
 			dev_err(dev, "Failed to gpio_request %d\n", pdata->gpio_en);
 		gpio_direction_output(pdata->gpio_en, 1);

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
@@ -10,7 +23,7 @@
 
 #include "mt_spm_internal.h"
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 #include "mt_vcore_dvfs.h"
 #endif
 
@@ -21,6 +34,11 @@ void __weak aee_sram_printk(const char *fmt, ...)
 int __weak is_ext_buck_exist(void)
 {
 	return 0;
+}
+
+void __attribute__((weak)) __iomem *spm_get_i2c_base(void)
+{
+	return NULL;
 }
 
 /*
@@ -35,7 +53,7 @@ int __weak is_ext_buck_exist(void)
 DEFINE_SPINLOCK(__spm_lock);
 atomic_t __spm_mainpll_req = ATOMIC_INIT(0);
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 static const char *wakesrc_str[32] = {
 	[0] = "SPM_MERGE",
 	[1] = "LTE_PTP",
@@ -211,7 +229,7 @@ void __spm_set_power_control(const struct pwr_ctrl *pwrctrl)
 	/* set other SYS request mask */
 	spm_write(SPM_AP_STANBY_CON, (!pwrctrl->md_vrf18_req_mask_b << 29) |
 		  (!pwrctrl->lte_mask << 26) |
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 		  (spm_read(SPM_AP_STANBY_CON) & ASC_SRCCLKENI_MASK) |
 #else
 		  (!pwrctrl->srclkenai_mask << 25) |
@@ -312,7 +330,7 @@ void __spm_get_wakeup_status(struct wake_status *wakesta)
 	wakesta->assert_pc = spm_read(SPM_PCM_REG_DATA_INI);
 
 	/* get wakeup event */
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	wakesta->r12 = spm_read(SPM_PCM_RESERVE3);
 #else
 	wakesta->r12 = spm_read(SPM_PCM_REG12_DATA);
@@ -332,7 +350,7 @@ void __spm_get_wakeup_status(struct wake_status *wakesta)
 	wakesta->debug_flag = spm_read(SPM_PCM_RESERVE4);
 
 	/* get special pattern (0xf0000 or 0x10000) if sleep abort */
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	wakesta->event_reg = spm_read(SPM_PCM_PASR_DPD_2);
 #else
 	wakesta->event_reg = spm_read(SPM_PCM_EVENT_REG_STA);
@@ -405,7 +423,7 @@ wake_reason_t __spm_output_wake_reason(const struct wake_status *wakesta,
 			wr = WR_WAKE_SRC;
 		}
 	}
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	BUG_ON(strlen(buf) >= LOG_BUF_SIZE);
 #endif
 
@@ -438,7 +456,7 @@ void __spm_dbgout_md_ddr_en(bool enable)
 	spm_write(SPM_PCM_DEBUG_CON, !!enable);
 }
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 u32 __spm_dpidle_sodi_set_pmic_setting(void)
 {
 	u32 vsram_vosel_on_lb = 0;
@@ -480,11 +498,18 @@ void __spm_dpidle_sodi_restore_pmic_setting(u32 vsram_vosel_on_lb)
 
 #ifdef CONFIG_ARCH_MT6753
 #include <mach/mt_clkmgr.h>
+#include <linux/i2c.h>
+#include "mt_i2c.h"
 static u32 i2c4_conf_backup;
 static u32 i2c4_conf_backup1;
 void __spm_enable_i2c4_clk(void)
 {
 	if (is_ext_buck_exist()) {
+		i2c4_base = spm_get_i2c_base();
+
+		if (i2c4_base == NULL)
+			BUG();
+
 		enable_clock(MT_CG_PERI_I2C4, "suspend");
 
 		/* Backup I2C setting */
@@ -498,6 +523,11 @@ void __spm_enable_i2c4_clk(void)
 void __spm_disable_i2c4_clk(void)
 {
 	if (is_ext_buck_exist()) {
+		i2c4_base = spm_get_i2c_base();
+
+		if (i2c4_base == NULL)
+			BUG();
+
 		/* Restore I2C setting */
 		spm_write(i2c4_base + 0x48, i2c4_conf_backup1);
 		spm_write(i2c4_base + 0x10, i2c4_conf_backup);
@@ -535,18 +565,20 @@ static int dt_scan_memory(unsigned long node, const char *uname, int depth, void
 		dram_info = (const struct dram_info *)of_get_flat_dt_prop(node, "orig_dram_info", NULL);
 	}
 
-	if ((dram_info->rank_info[1].start == 0x60000000)
-	    || (dram_info->rank_info[1].start == 0x70000000))
-		spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL0;
-	else if (dram_info->rank_info[1].start == 0x80000000)
-		spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL1;
-	else if (dram_info->rank_info[1].start == 0xc0000000)
-		spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL2;
-	else if (dram_info->rank_info[1].start == 0xa0000000)
-		spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL3;
-	else if (dram_info->rank_info[1].size != 0x0) {
-		pr_err("dram rank1_info_error: no rank info\n");
-		BUG_ON(1);
+	if (dram_info) {
+		if ((dram_info->rank_info[1].start == 0x60000000)
+		    || (dram_info->rank_info[1].start == 0x70000000))
+			spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL0;
+		else if (dram_info->rank_info[1].start == 0x80000000)
+			spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL1;
+		else if (dram_info->rank_info[1].start == 0xc0000000)
+			spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL2;
+		else if (dram_info->rank_info[1].start == 0xa0000000)
+			spm_dram_dummy_read_flags |= SPM_DRAM_RANK1_ADDR_SEL3;
+		else if (dram_info->rank_info[1].size != 0x0) {
+			pr_err("dram rank1_info_error: no rank info\n");
+			BUG_ON(1);
+		}
 	}
 
 	return node;

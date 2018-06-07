@@ -1,3 +1,17 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
+
 #include <accdet.h>
 
 static struct platform_driver accdet_driver;
@@ -42,6 +56,7 @@ static int accdet_remove(struct platform_device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
 static int accdet_suspend(struct device *device)
 {				/* wake up */
 	mt_accdet_suspend();
@@ -53,6 +68,7 @@ static int accdet_resume(struct device *device)
 	mt_accdet_resume();
 	return 0;
 }
+#endif
 
 /**********************************************************************
 //add for IPO-H need update headset state when resume
@@ -64,15 +80,6 @@ static int accdet_pm_restore_noirq(struct device *device)
 	mt_accdet_pm_restore_noirq();
 	return 0;
 }
-struct of_device_id accdet_of_match[] = {
-	{ .compatible = "mediatek,mt6735-accdet", },
-	{ .compatible = "mediatek,mt6755-accdet", },
-	{ .compatible = "mediatek,mt6580-accdet", },
-	{ .compatible = "mediatek,mt8173-accdet", },
-	{ .compatible = "mediatek,mt8163-accdet", },
-	{ .compatible = "mediatek,mt6797-accdet", },
-	{},
-};
 
 static const struct dev_pm_ops accdet_pm_ops = {
 	.suspend = accdet_suspend,
@@ -80,6 +87,20 @@ static const struct dev_pm_ops accdet_pm_ops = {
 	.restore_noirq = accdet_pm_restore_noirq,
 };
 #endif
+
+struct of_device_id accdet_of_match[] = {
+	{ .compatible = "mediatek,mt6735-accdet", },
+	{ .compatible = "mediatek,mt6755-accdet", },
+	{ .compatible = "mediatek,mt6757-accdet", },
+	{ .compatible = "mediatek,mt6570-accdet", },
+	{ .compatible = "mediatek,mt6580-accdet", },
+	{ .compatible = "mediatek,mt8173-accdet", },
+	{ .compatible = "mediatek,mt8163-accdet", },
+	{ .compatible = "mediatek,mt8127-accdet", },
+	{ .compatible = "mediatek,mt6797-accdet", },
+	{ .compatible = "mediatek,elbrus-accdet", },
+	{},
+};
 
 static struct platform_driver accdet_driver = {
 	.probe = accdet_probe,

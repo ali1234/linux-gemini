@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 	.global write_cntpctl
 write_cntpctl:
 	.func
@@ -250,6 +263,10 @@ L2_cl_finished:
 	.global cpu_wake_up_errata_802022
 cpu_wake_up_errata_802022:
 	.func
+@ Before Slave CPU goes to Errata WFI, we turn off GIC CPU interface to the CPU first.
+	ldr	r0, =0x10212000
+	mov	r1, #0
+	str	r1, [r0]
 1:
 	isb
 	dsb

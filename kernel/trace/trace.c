@@ -43,6 +43,10 @@
 #include <linux/fs.h>
 #include <linux/sched/rt.h>
 
+#ifdef CONFIG_MTK_EXTMEM
+#include <linux/exm_driver.h>
+#endif
+
 #include "trace.h"
 #include "trace_output.h"
 
@@ -333,17 +337,22 @@ int tracing_is_enabled(void)
  * to not have to wait for all that output. Anyway this can be
  * boot time and run time configurable.
  */
+#ifdef CONFIG_MTK_FTRACE_DEFAULT_ENABLE
+#ifdef CONFIG_LOW_RAM_DEBUG
+#define TRACE_BUF_SIZE_DEFAULT	3355443UL
+#else
+#define TRACE_BUF_SIZE_DEFAULT	4194304UL
+#endif
+#else
 #define TRACE_BUF_SIZE_DEFAULT	1441792UL /* 16384 * 88 (sizeof(entry)) */
+#endif
 
 static unsigned long		trace_buf_size = TRACE_BUF_SIZE_DEFAULT;
 
-#ifdef CONFIG_MTK_SCHED_TRACERS
-#define SIZE_CPUX_DEFAULT 4194304UL
-#define CPU0_to_CPUX_RATIO (1.2)
-static unsigned long        size_cpu0 = (SIZE_CPUX_DEFAULT * CPU0_to_CPUX_RATIO);
-static unsigned long        size_cpuX = SIZE_CPUX_DEFAULT;
-static bool trace_buf_size_updated_from_cmdline;
-#endif
+void update_buf_size(unsigned long size)
+{
+	trace_buf_size = size;
+}
 
 /* trace_types holds a link list of available tracers. */
 static struct tracer		*trace_types __read_mostly;
@@ -783,10 +792,6 @@ static int __init set_buf_size(char *str)
 	if (buf_size == 0)
 		return 0;
 	trace_buf_size = buf_size;
-#ifdef CONFIG_MTK_SCHED_TRACERS
-	size_cpu0 = size_cpuX = buf_size;
-	trace_buf_size_updated_from_cmdline = true;
-#endif
 	return 1;
 }
 __setup("trace_buf_size=", set_buf_size);
@@ -1308,7 +1313,7 @@ void tracing_reset_all_online_cpus(void)
 
 #define SAVED_CMDLINES_DEFAULT 128
 #define NO_CMDLINE_MAP UINT_MAX
-static unsigned saved_tgids[SAVED_CMDLINES_DEFAULT];
+static unsigned *saved_tgids;
 static arch_spinlock_t trace_cmdline_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 struct saved_cmdlines_buffer {
 	unsigned map_pid_to_cmdline[PID_MAX_DEFAULT+1];
@@ -1335,16 +1340,47 @@ static inline void set_cmdline(int idx, const char *cmdline)
 static int allocate_cmdlines_buffer(unsigned int val,
 				    struct saved_cmdlines_buffer *s)
 {
+#ifdef CONFIG_MTK_EXTMEM
+	s->map_cmdline_to_pid = extmem_malloc(val * sizeof(*s->map_cmdline_to_pid));
+#else
 	s->map_cmdline_to_pid = kmalloc(val * sizeof(*s->map_cmdline_to_pid),
 					GFP_KERNEL);
+#endif
 	if (!s->map_cmdline_to_pid)
 		return -ENOMEM;
 
+#ifdef CONFIG_MTK_EXTMEM
+	s->saved_cmdlines = extmem_malloc(val * TASK_COMM_LEN);
+#else
 	s->saved_cmdlines = kmalloc(val * TASK_COMM_LEN, GFP_KERNEL);
+#endif
 	if (!s->saved_cmdlines) {
+#ifdef CONFIG_MTK_EXTMEM
+		extmem_free((void *)s->map_cmdline_to_pid);
+#else
 		kfree(s->map_cmdline_to_pid);
+#endif
 		return -ENOMEM;
 	}
+
+#ifdef CONFIG_MTK_EXTMEM
+	if (saved_tgids)
+		extmem_free((void *)saved_tgids);
+	saved_tgids = extmem_malloc(val * sizeof(*saved_tgids));
+	if (!saved_tgids) {
+		extmem_free((void *)s->map_cmdline_to_pid);
+		extmem_free((void *)s->saved_cmdlines);
+		return -ENOMEM;
+	}
+#else
+	kfree(saved_tgids);
+	saved_tgids = kmalloc_array(val, sizeof(*saved_tgids), GFP_KERNEL);
+	if (!saved_tgids) {
+		kfree(s->map_cmdline_to_pid);
+		kfree(s->saved_cmdlines);
+		return -ENOMEM;
+	}
+#endif
 
 	s->cmdline_idx = 0;
 	s->cmdline_num = val;
@@ -1359,14 +1395,22 @@ static int allocate_cmdlines_buffer(unsigned int val,
 static int trace_create_savedcmd(void)
 {
 	int ret;
-
+#ifdef CONFIG_MTK_EXTMEM
+	savedcmd =
+		(struct saved_cmdlines_buffer *)extmem_malloc(sizeof(*savedcmd));
+#else
 	savedcmd = kmalloc(sizeof(*savedcmd), GFP_KERNEL);
+#endif
 	if (!savedcmd)
 		return -ENOMEM;
 
 	ret = allocate_cmdlines_buffer(SAVED_CMDLINES_DEFAULT, savedcmd);
 	if (ret < 0) {
+#ifdef CONFIG_MTK_EXTMEM
+		extmem_free((void *)savedcmd);
+#else
 		kfree(savedcmd);
+#endif
 		savedcmd = NULL;
 		return -ENOMEM;
 	}
@@ -2588,7 +2632,7 @@ static void print_event_info(struct trace_buffer *buf, struct seq_file *m)
 	seq_printf(m, "# entries-in-buffer/entries-written: %lu/%lu   #P:%d\n",
 		   entries, total, num_online_cpus());
 #ifdef CONFIG_MTK_SCHED_TRACERS
-	print_enabled_events(m);
+	print_enabled_events(buf, m);
 #endif
 	seq_puts(m, "#\n");
 }
@@ -3929,21 +3973,35 @@ tracing_saved_cmdlines_size_read(struct file *filp, char __user *ubuf,
 
 static void free_saved_cmdlines_buffer(struct saved_cmdlines_buffer *s)
 {
+#ifdef CONFIG_MTK_EXTMEM
+	extmem_free((void *)s->saved_cmdlines);
+	extmem_free((void *)s->map_cmdline_to_pid);
+	extmem_free((void *)s);
+#else
 	kfree(s->saved_cmdlines);
 	kfree(s->map_cmdline_to_pid);
 	kfree(s);
+#endif
 }
 
 static int tracing_resize_saved_cmdlines(unsigned int val)
 {
 	struct saved_cmdlines_buffer *s, *savedcmd_temp;
 
+#ifdef CONFIG_MTK_EXTMEM
+	s = (struct saved_cmdlines_buffer *)extmem_malloc(sizeof(*s));
+#else
 	s = kmalloc(sizeof(*s), GFP_KERNEL);
+#endif
 	if (!s)
 		return -ENOMEM;
 
 	if (allocate_cmdlines_buffer(val, s) < 0) {
+#ifdef CONFIG_MTK_EXTMEM
+		extmem_free((void *)s);
+#else
 		kfree(s);
+#endif
 		return -ENOMEM;
 	}
 
@@ -4192,38 +4250,11 @@ out:
 int tracing_update_buffers(void)
 {
 	int ret = 0;
-#ifdef CONFIG_MTK_FTRACE_DEFAULT_ENABLE
-	int i = 0;
-	unsigned long size;
-#endif
 
 	mutex_lock(&trace_types_lock);
-#ifdef CONFIG_MTK_FTRACE_DEFAULT_ENABLE
-	if (!ring_buffer_expanded) {
-		if (!trace_buf_size_updated_from_cmdline &&
-		    (totalram_pages << (PAGE_SHIFT - 10)) > (1 << 20)) {
-			size_cpu0 = (SIZE_CPUX_DEFAULT * CPU0_to_CPUX_RATIO * 1.25);
-			size_cpuX = (SIZE_CPUX_DEFAULT * 1.25);
-		}
-
-		for_each_tracing_cpu(i) {
-			if (i == 0)
-				size = size_cpu0;
-			else
-				size = size_cpuX;
-			ret = __tracing_resize_ring_buffer(&global_trace, size, i);
-			if (ret < 0) {
-				pr_debug("[ftrace]fail to update cpu%d ring buffer to %lu KB\n",
-					i, size);
-				break;
-			}
-		}
-	}
-#else
 	if (!ring_buffer_expanded)
 		ret = __tracing_resize_ring_buffer(&global_trace, trace_buf_size,
 						RING_BUFFER_ALL_CPUS);
-#endif
 	mutex_unlock(&trace_types_lock);
 
 	return ret;
@@ -4841,7 +4872,10 @@ static ssize_t tracing_splice_read_pipe(struct file *filp,
 
 	spd.nr_pages = i;
 
-	ret = splice_to_pipe(pipe, &spd);
+	if (i)
+		ret = splice_to_pipe(pipe, &spd);
+	else
+		ret = 0;
 out:
 	splice_shrink_spd(&spd);
 	return ret;

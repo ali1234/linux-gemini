@@ -194,7 +194,7 @@ struct tty_port_operations {
 	/* Called on the final put of a port */
 	void (*destruct)(struct tty_port *port);
 };
-	
+
 struct tty_port {
 	struct tty_bufhead	buf;		/* Locked internally */
 	struct tty_struct	*tty;		/* Back pointer */
@@ -266,6 +266,7 @@ struct tty_struct {
 		      flow_stopped:1,
 		      unused:BITS_PER_LONG - 2;
 	int hw_stopped;
+	unsigned char peer_stops:1;
 	unsigned long ctrl_status:8,	/* ctrl_lock */
 		      packet:1,
 		      unused_ctrl:BITS_PER_LONG - 9;
@@ -574,7 +575,7 @@ static inline int tty_ldisc_receive_buf(struct tty_ldisc *ld, unsigned char *p,
 		count = ld->ops->receive_buf2(ld->tty, p, f, count);
 	else {
 		count = min_t(int, count, ld->tty->receive_room);
-		if (count)
+		if (count && ld->ops->receive_buf)
 			ld->ops->receive_buf(ld->tty, p, f, count);
 	}
 	return count;

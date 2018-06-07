@@ -98,6 +98,18 @@
 /* MTK */
 #include <platform/mtk_platform_common.h>
 
+/* MTK GPU DVFS */
+#include <mali_kbase_pm.h>
+#include <mt_gpufreq.h>
+#include <mali_kbase_pm_defs.h>
+#include <mali_kbase_pm_internal.h>
+#include <ged_dvfs.h>
+#include <ged_log.h>
+unsigned int _mtk_mali_ged_log = 0;
+
+/* MTK chip version API */
+#include "mt_chip.h"
+
 /* GPU IRQ Tags */
 #define	JOB_IRQ_TAG	0
 #define MMU_IRQ_TAG	1
@@ -113,6 +125,12 @@ EXPORT_SYMBOL(shared_kernel_test_data);
 static const char kbase_drv_name[] = KBASE_DRV_NAME;
 
 static int kbase_dev_nr;
+
+/* MTK GPU DVFS freq */
+
+/// MTK_GED {
+static struct kbase_device *gpsMaliData = NULL;
+///}
 
 static DEFINE_MUTEX(kbase_dev_list_lock);
 static LIST_HEAD(kbase_dev_list);
@@ -349,6 +367,32 @@ out:
 }
 #endif /* CONFIG_KDS */
 
+/// MTK_GED {
+struct kbase_device *MaliGetMaliData(void)
+{
+	return gpsMaliData;
+}
+/// }
+
+/// MTK_GED {
+void mtk_gpu_dvfs_commit(unsigned long ui32NewFreqID, GED_DVFS_COMMIT_TYPE eCommitType, int* pbCommited)
+{
+	int ret;
+#ifdef MTK_MT6797_DEBUG
+	if (ui32NewFreqID > 6)
+		ui32NewFreqID = 6;
+#endif
+	ret = mtk_set_mt_gpufreq_target(ui32NewFreqID);
+
+	if (pbCommited) {
+		if (0 == ret) {
+			*pbCommited = true;
+		} else {
+			*pbCommited = false;
+		}
+	}
+}
+///
 #ifdef CONFIG_MALI_MIPE_ENABLED
 static void kbase_create_timeline_objects(struct kbase_context *kctx)
 {
@@ -1088,7 +1132,7 @@ copy_failed:
 				goto bad_size;
 
 			if (add_data->len > KBASE_MEM_PROFILE_MAX_BUF_SIZE) {
-				dev_err(kbdev->dev, "buffer too big");
+				dev_MTK_err(kbdev->dev, "buffer too big");
 				goto out_bad;
 			}
 
@@ -1184,14 +1228,14 @@ copy_failed:
 		}
 
 	default:
-		dev_err(kbdev->dev, "unknown ioctl %u", id);
+		dev_MTK_err(kbdev->dev, "unknown ioctl %u", id);
 		goto out_bad;
 	}
 
 	return 0;
 
  bad_size:
-	dev_err(kbdev->dev, "Wrong syscall size (%d) for %08x\n", args_size, id);
+	dev_MTK_err(kbdev->dev, "Wrong syscall size (%d) for %08x\n", args_size, id);
  out_bad:
 	return -EINVAL;
 }
@@ -1385,25 +1429,40 @@ static int kbase_release(struct inode *inode, struct file *filp)
 
 static long kbase_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	u64 msg[(CALL_MAX_SIZE + 7) >> 3] = { 0xdeadbeefdeadbeefull };	/* alignment fixup */
+	///u64 msg[(CALL_MAX_SIZE + 7) >> 3] = { 0xdeadbeefdeadbeefull };	/* alignment fixup */
+	u64* msg = kmalloc(CALL_MAX_SIZE + 7, GFP_KERNEL);
 	u32 size = _IOC_SIZE(cmd);
 	struct kbase_context *kctx = filp->private_data;
 
-	if (size > CALL_MAX_SIZE)
+	if (size > CALL_MAX_SIZE){
+		kfree(msg);
 		return -ENOTTY;
+	}
 
-	if (0 != copy_from_user(&msg, (void __user *)arg, size)) {
-		dev_err(kctx->kbdev->dev, "failed to copy ioctl argument into kernel space\n");
+	if (!msg) {        
+		pr_alert("kmalloc fail, %d byte\n", CALL_MAX_SIZE + 7);        
+		kfree(msg);
+		return -EFAULT;    
+	}
+	*msg = 0xdeadbeefdeadbeefull;
+
+	if (0 != copy_from_user(msg, (void __user *)arg, size)) {
+		dev_MTK_err(kctx->kbdev->dev, "failed to copy ioctl argument into kernel space\n");
+		kfree(msg);
 		return -EFAULT;
 	}
 
-	if (kbase_dispatch(kctx, &msg, size) != 0)
-		return -EFAULT;
-
-	if (0 != copy_to_user((void __user *)arg, &msg, size)) {
-		dev_err(kctx->kbdev->dev, "failed to copy results of UK call back to user space\n");
+	if (MALI_ERROR_NONE != kbase_dispatch(kctx, msg, size)){
+		kfree(msg);
 		return -EFAULT;
 	}
+	if (0 != copy_to_user((void __user *)arg, msg, size)) {
+		dev_MTK_err(kctx->kbdev->dev, "failed to copy results of UK call back to user space\n");
+		kfree(msg);
+		return -EFAULT;
+	}
+    
+	kfree(msg);
 	return 0;
 }
 
@@ -1682,7 +1741,7 @@ static ssize_t set_policy(struct device *dev, struct device_attribute *attr, con
 	}
 
 	if (!new_policy) {
-		dev_err(dev, "power_policy: policy not found\n");
+		dev_MTK_err(dev, "power_policy: policy not found\n");
 		return -EINVAL;
 	}
 
@@ -1784,7 +1843,7 @@ static ssize_t set_ca_policy(struct device *dev, struct device_attribute *attr, 
 	}
 
 	if (!new_policy) {
-		dev_err(dev, "core_availability_policy: policy not found\n");
+		dev_MTK_err(dev, "core_availability_policy: policy not found\n");
 		return -EINVAL;
 	}
 
@@ -1859,7 +1918,7 @@ static ssize_t set_core_mask(struct device *dev, struct device_attribute *attr, 
 	if ((new_core_mask & kbdev->gpu_props.props.raw_props.shader_present)
 			!= new_core_mask ||
 	    !(new_core_mask & kbdev->gpu_props.props.coherency_info.group[0].core_mask)) {
-		dev_err(dev, "power_policy: invalid core specification\n");
+		dev_MTK_err(dev, "power_policy: invalid core specification\n");
 		return -EINVAL;
 	}
 
@@ -1986,8 +2045,8 @@ static ssize_t set_split(struct device *dev, struct device_attribute *attr, cons
 	}
 
 	/* No match found in config list */
-	dev_err(dev, "sc_split: invalid value\n");
-	dev_err(dev, "  Possible settings: mp[1|2|4], mp[1|2]_vf\n");
+	dev_MTK_err(dev, "sc_split: invalid value\n");
+	dev_MTK_err(dev, "  Possible settings: mp[1|2|4], mp[1|2]_vf\n");
 	return -ENOENT;
 }
 
@@ -2141,7 +2200,7 @@ static ssize_t set_js_timeouts(struct device *dev, struct device_attribute *attr
 		return count;
 	}
 
-	dev_err(kbdev->dev, "Couldn't process js_timeouts write operation.\n"
+	dev_MTK_err(kbdev->dev, "Couldn't process js_timeouts write operation.\n"
 			"Use format <soft_stop_ms> <soft_stop_ms_cl> <hard_stop_ms_ss> <hard_stop_ms_cl> <hard_stop_ms_dumping> <reset_ms_ss> <reset_ms_cl> <reset_ms_dumping>\n"
 			"Write 0 for no change, -1 to restore default timeout\n");
 	return -EINVAL;
@@ -2310,7 +2369,7 @@ static ssize_t set_js_scheduling_period(struct device *dev,
 
 	ret = kstrtouint(buf, 0, &js_scheduling_period);
 	if (ret || !js_scheduling_period) {
-		dev_err(kbdev->dev, "Couldn't process js_scheduling_period write operation.\n"
+		dev_MTK_err(kbdev->dev, "Couldn't process js_scheduling_period write operation.\n"
 				"Use format <js_scheduling_period_ms>\n");
 		return -EINVAL;
 	}
@@ -2492,7 +2551,7 @@ static ssize_t set_force_replay(struct device *dev, struct device_attribute *att
 			return count;
 		}
 	}
-	dev_err(kbdev->dev, "Couldn't process force_replay write operation.\nPossible settings: limit=<limit>, random_limit, norandom_limit, core_req=<core_req>\n");
+	dev_MTK_err(kbdev->dev, "Couldn't process force_replay write operation.\nPossible settings: limit=<limit>, random_limit, norandom_limit, core_req=<core_req>\n");
 	return -EINVAL;
 }
 
@@ -2558,7 +2617,7 @@ static ssize_t set_js_softstop_always(struct device *dev,
 
 	ret = kstrtoint(buf, 0, &softstop_always);
 	if (ret || ((softstop_always != 0) && (softstop_always != 1))) {
-		dev_err(kbdev->dev, "Couldn't process js_softstop_always write operation.\n"
+		dev_MTK_err(kbdev->dev, "Couldn't process js_softstop_always write operation.\n"
 				"Use format <soft_stop_always>\n");
 		return -EINVAL;
 	}
@@ -2688,7 +2747,7 @@ static ssize_t issue_debug(struct device *dev, struct device_attribute *attr, co
 	}
 
 	/* Debug Command not found */
-	dev_err(dev, "debug_command: command not known\n");
+	dev_MTK_err(dev, "debug_command: command not known\n");
 	return -EINVAL;
 }
 
@@ -2785,7 +2844,7 @@ static ssize_t set_dvfs_period(struct device *dev,
 
 	ret = kstrtoint(buf, 0, &dvfs_period);
 	if (ret || dvfs_period <= 0) {
-		dev_err(kbdev->dev, "Couldn't process dvfs_period write operation.\n"
+		dev_MTK_err(kbdev->dev, "Couldn't process dvfs_period write operation.\n"
 				"Use format <dvfs_period_ms>\n");
 		return -EINVAL;
 	}
@@ -2858,7 +2917,7 @@ static ssize_t set_pm_poweroff(struct device *dev,
 			&poweroff_shader_ticks,
 			&poweroff_gpu_ticks);
 	if (items != 3) {
-		dev_err(kbdev->dev, "Couldn't process pm_poweroff write operation.\n"
+		dev_MTK_err(kbdev->dev, "Couldn't process pm_poweroff write operation.\n"
 				"Use format <gpu_poweroff_time_ns> <poweroff_shader_ticks> <poweroff_gpu_ticks>\n");
 		return -EINVAL;
 	}
@@ -2927,7 +2986,7 @@ static ssize_t set_reset_timeout(struct device *dev,
 
 	ret = kstrtoint(buf, 0, &reset_timeout);
 	if (ret || reset_timeout <= 0) {
-		dev_err(kbdev->dev, "Couldn't process reset_timeout write operation.\n"
+		dev_MTK_err(kbdev->dev, "Couldn't process reset_timeout write operation.\n"
 				"Use format <reset_timeout_ms>\n");
 		return -EINVAL;
 	}
@@ -3083,14 +3142,14 @@ static int kbase_common_reg_map(struct kbase_device *kbdev)
 	int err = -ENOMEM;
 
 	if (!request_mem_region(kbdev->reg_start, kbdev->reg_size, dev_name(kbdev->dev))) {
-		dev_err(kbdev->dev, "Register window unavailable\n");
+		dev_MTK_err(kbdev->dev, "Register window unavailable\n");
 		err = -EIO;
 		goto out_region;
 	}
 
 	kbdev->reg = ioremap(kbdev->reg_start, kbdev->reg_size);
 	if (!kbdev->reg) {
-		dev_err(kbdev->dev, "Can't remap register window\n");
+		dev_MTK_err(kbdev->dev, "Can't remap register window\n");
 		err = -EINVAL;
 		goto out_ioremap;
 	}
@@ -3182,7 +3241,7 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 	kbdev->mali_debugfs_directory = debugfs_create_dir(kbdev->devname,
 			NULL);
 	if (!kbdev->mali_debugfs_directory) {
-		dev_err(kbdev->dev, "Couldn't create mali debugfs directory\n");
+		dev_MTK_err(kbdev->dev, "Couldn't create mali debugfs directory\n");
 		err = -ENOMEM;
 		goto out;
 	}
@@ -3190,7 +3249,7 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 	kbdev->debugfs_ctx_directory = debugfs_create_dir("ctx",
 			kbdev->mali_debugfs_directory);
 	if (!kbdev->debugfs_ctx_directory) {
-		dev_err(kbdev->dev, "Couldn't create mali debugfs ctx directory\n");
+		dev_MTK_err(kbdev->dev, "Couldn't create mali debugfs ctx directory\n");
 		err = -ENOMEM;
 		goto out;
 	}
@@ -3198,7 +3257,7 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 	debugfs_ctx_defaults_directory = debugfs_create_dir("defaults",
 			kbdev->debugfs_ctx_directory);
 	if (!debugfs_ctx_defaults_directory) {
-		dev_err(kbdev->dev, "Couldn't create mali debugfs ctx defaults directory\n");
+		dev_MTK_err(kbdev->dev, "Couldn't create mali debugfs ctx defaults directory\n");
 		err = -ENOMEM;
 		goto out;
 	}
@@ -3237,6 +3296,10 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 	debugfs_create_file("secure_mode", S_IRUGO,
 			kbdev->mali_debugfs_directory, kbdev,
 			&kbasep_secure_mode_debugfs_fops);
+	kbdev->debug_gpu_page_tables = 1;
+	debugfs_create_u8("debug_gpu_page_tables", 0644,
+			kbdev->mali_debugfs_directory,
+			&kbdev->debug_gpu_page_tables);
 
 	return 0;
 
@@ -3287,7 +3350,7 @@ static void kbase_device_coherency_init(struct kbase_device *kbdev, u32 gpu_id)
 
 			kbdev->system_coherency = override_coherency;
 
-			dev_info(kbdev->dev,
+			dev_MTK_info(kbdev->dev,
 				"Using coherency override, mode %u set from dtb",
 				override_coherency);
 		} else
@@ -3314,7 +3377,7 @@ static void kbase_logging_started_cb(void *data)
 
 	if (kbase_prepare_to_reset_gpu(kbdev))
 		kbase_reset_gpu(kbdev);
-	dev_info(kbdev->dev, "KBASE - Bus logger restarted\n");
+	dev_MTK_info(kbdev->dev, "KBASE - Bus logger restarted\n");
 }
 #endif
 
@@ -3399,7 +3462,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 
 	err = kbase_device_init(kbdev);
 	if (err) {
-		dev_err(kbdev->dev, "Can't initialize device (%d)\n", err);
+		dev_MTK_err(kbdev->dev, "Can't initialize device (%d)\n", err);
 		goto out_partial;
 	}
 
@@ -3407,7 +3470,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 
 	kbdev->vinstr_ctx = kbase_vinstr_init(kbdev);
 	if (!kbdev->vinstr_ctx) {
-		dev_err(kbdev->dev, "Can't initialize virtual instrumentation core\n");
+		dev_MTK_err(kbdev->dev, "Can't initialize virtual instrumentation core\n");
 		goto out_partial;
 	}
 
@@ -3415,7 +3478,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 
 	kbdev->ipa_ctx = kbase_ipa_init(kbdev);
 	if (!kbdev->ipa_ctx) {
-		dev_err(kbdev->dev, "Can't initialize IPA\n");
+		dev_MTK_err(kbdev->dev, "Can't initialize IPA\n");
 		goto out_partial;
 	}
 
@@ -3454,7 +3517,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 #ifdef CONFIG_MALI_MIPE_ENABLED
 	err = kbase_tlstream_init();
 	if (err) {
-		dev_err(kbdev->dev, "Couldn't initialize timeline stream\n");
+		dev_MTK_err(kbdev->dev, "Couldn't initialize timeline stream\n");
 		goto out_partial;
 	}
 	inited |= inited_tlstream;
@@ -3468,11 +3531,19 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 #ifdef CONFIG_MALI_DEVFREQ
 	err = kbase_devfreq_init(kbdev);
 	if (err) {
-		dev_err(kbdev->dev, "Couldn't initialize devfreq\n");
+		dev_MTK_err(kbdev->dev, "Couldn't initialize devfreq\n");
 		goto out_partial;
 	}
 	inited |= inited_devfreq;
 #endif /* CONFIG_MALI_DEVFREQ */
+
+#ifdef ENABLE_MTK_MEMINFO
+	mtk_kbase_gpu_memory_debug_init();
+#endif /* ENABLE_MTK_MEMINFO */
+
+#ifdef CONFIG_PROC_FS
+	proc_mali_register();
+#endif /* CONFIG_PROC_FS */
 
 	err = kbase_device_debugfs_init(kbdev);
 	if (err)
@@ -3489,7 +3560,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 
 	err = misc_register(&kbdev->mdev);
 	if (err) {
-		dev_err(kbdev->dev, "Couldn't register misc dev %s\n", kbdev->devname);
+		dev_MTK_err(kbdev->dev, "Couldn't register misc dev %s\n", kbdev->devname);
 		goto out_misc;
 	}
 
@@ -3500,7 +3571,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 		kbase_dev_list_put(dev_list);
 	}
 
-	dev_info(kbdev->dev, "Probed as %s\n", dev_name(kbdev->mdev.this_device));
+	dev_MTK_info(kbdev->dev, "Probed as %s\n", dev_name(kbdev->mdev.this_device));
 
 	return 0;
 
@@ -3581,6 +3652,12 @@ static const struct attribute_group kbase_attr_group = {
 
 static int kbase_common_device_remove(struct kbase_device *kbdev);
 
+/// MTK{
+extern void (*ged_dvfs_cal_gpu_utilization_fp)(unsigned int* pui32Loading , unsigned int* pui32Block,unsigned int* pui32Idle);
+extern void (*ged_dvfs_gpu_freq_commit_fp)(unsigned long ui32NewFreqID, GED_DVFS_COMMIT_TYPE eCommitType, int* pbCommited);
+extern unsigned int (*mtk_get_gpu_power_loading_fp)(void);
+/// }
+
 static int kbase_platform_device_probe(struct platform_device *pdev)
 {
 	struct kbase_device *kbdev;
@@ -3588,24 +3665,26 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	int err = 0;
 	int i;
 
+	pr_alert("[MALI] Midgard r7p0-02rel0 DDK kernel device driver. GPU probe() begin.\n");
+
 #ifdef CONFIG_OF
 	err = kbase_platform_early_init();
 	if (err) {
-		dev_err(&pdev->dev, "Early platform initialization failed\n");
+		dev_MTK_err(&pdev->dev, "Early platform initialization failed\n");
 		return err;
 	}
 #endif
 
 	kbdev = kbase_device_alloc();
 	if (!kbdev) {
-		dev_err(&pdev->dev, "Can't allocate device\n");
+		dev_MTK_err(&pdev->dev, "Can't allocate device\n");
 		err = -ENOMEM;
 		goto out;
 	}
 #ifdef CONFIG_MALI_NO_MALI
 	err = gpu_device_create(kbdev);
 	if (err) {
-		dev_err(&pdev->dev, "Can't initialize dummy model\n");
+		dev_MTK_err(&pdev->dev, "Can't initialize dummy model\n");
 		goto out_midg;
 	}
 #endif /* CONFIG_MALI_NO_MALI */
@@ -3618,7 +3697,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 
 		irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, i);
 		if (!irq_res) {
-			dev_err(kbdev->dev, "No IRQ resource at index %d\n", i);
+			dev_MTK_err(kbdev->dev, "No IRQ resource at index %d\n", i);
 			err = -ENOENT;
 			goto out_platform_irq;
 		}
@@ -3631,7 +3710,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 		} else if (!strcmp(irq_res->name, "GPU")) {
 			irqtag = GPU_IRQ_TAG;
 		} else {
-			dev_err(&pdev->dev, "Invalid irq res name: '%s'\n",
+			dev_MTK_err(&pdev->dev, "Invalid irq res name: '%s'\n",
 				irq_res->name);
 			err = -EINVAL;
 			goto out_irq_name;
@@ -3646,7 +3725,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 		 * registers */
 		reg_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 		if (!reg_res) {
-			dev_err(kbdev->dev, "Invalid register resource\n");
+			dev_MTK_err(kbdev->dev, "Invalid register resource\n");
 			err = -ENOENT;
 			goto out_platform_mem;
 		}
@@ -3662,7 +3741,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 			&& defined(CONFIG_REGULATOR)
 	kbdev->regulator = regulator_get_optional(kbdev->dev, "mali");
 	if (IS_ERR_OR_NULL(kbdev->regulator)) {
-		dev_info(kbdev->dev, "Continuing without Mali regulator control\n");
+		dev_MTK_info(kbdev->dev, "Continuing without Mali regulator control\n");
 		kbdev->regulator = NULL;
 		/* Allow probe to continue without regulator */
 	}
@@ -3671,24 +3750,28 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 #ifdef CONFIG_MALI_PLATFORM_DEVICETREE
 	pm_runtime_enable(kbdev->dev);
 #endif
+#ifdef CONFIG_HAVE_CLK  // MTK
 	kbdev->clock = clk_get(kbdev->dev, "clk_mali");
 	if (IS_ERR_OR_NULL(kbdev->clock)) {
-		dev_info(kbdev->dev, "Continuing without Mali clock control\n");
+		dev_MTK_info(kbdev->dev, "Continuing without Mali clock control\n");
 		kbdev->clock = NULL;
 		/* Allow probe to continue without clock. */
 	} else {
 		err = clk_prepare_enable(kbdev->clock);
 		if (err) {
-			dev_err(kbdev->dev,
+			dev_MTK_err(kbdev->dev,
 				"Failed to prepare and enable clock (%d)\n", err);
 			goto out_clock_prepare;
 		}
 	}
+#endif  /* CONFIG_HAVE_CLK */
 
 	/* MTK: common */
+	/*_mtk_mali_ged_log = ged_log_buf_alloc(4096 * 8, 128 * 4096 * 8, GED_LOG_BUF_TYPE_RINGBUFFER, "MALI", NULL);*/
+
 	if (mtk_platform_init(pdev, kbdev))
 	{
-		dev_err(kbdev->dev, "GPU: mtk_platform_init fail");
+		dev_MTK_err(kbdev->dev, "GPU: mtk_platform_init fail");
 		goto out_clock_prepare;
 	}
 
@@ -3702,13 +3785,13 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 
 	err = kbase_common_device_init(kbdev);
 	if (err) {
-		dev_err(kbdev->dev, "Failed kbase_common_device_init\n");
+		dev_MTK_err(kbdev->dev, "Failed kbase_common_device_init\n");
 		goto out_common_init;
 	}
 
 	err = sysfs_create_group(&kbdev->dev->kobj, &kbase_attr_group);
 	if (err) {
-		dev_err(&pdev->dev, "Failed to create sysfs entries\n");
+		dev_MTK_err(&pdev->dev, "Failed to create sysfs entries\n");
 		goto out_sysfs;
 	}
 
@@ -3718,12 +3801,25 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 						kbdev, &kbdev->buslogger,
 						THIS_MODULE, NULL);
 	if (err) {
-		dev_err(kbdev->dev, "Couldn't register bus log client\n");
+		dev_MTK_err(kbdev->dev, "Couldn't register bus log client\n");
 		goto out_bl_core_register;
 	}
 
 	bl_core_set_threshold(kbdev->buslogger, 1024*1024*1024);
 #endif
+
+	kbdev->gpu_fault_wq =
+		alloc_ordered_workqueue("kbase_gpu_fault_work_queue", 
+				WQ_FREEZABLE | WQ_MEM_RECLAIM);
+
+	gpsMaliData = kbdev;
+#ifdef ENABLE_COMMON_DVFS
+	ged_dvfs_cal_gpu_utilization_fp = MTKCalGpuUtilization;
+	ged_dvfs_gpu_freq_commit_fp = mtk_gpu_dvfs_commit;
+#endif
+
+	pr_alert("[MALI] Midgard r7p0-02rel0 DDK kernel device driver. GPU probe() end.\n");
+
 	return 0;
 
 #ifdef CONFIG_MALI_FPGA_BUS_LOGGER
@@ -3737,9 +3833,13 @@ out_common_init:
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0))
 	of_free_opp_table(kbdev->dev);
 #endif
+#ifdef CONFIG_HAVE_CLK  // MTK
 	clk_disable_unprepare(kbdev->clock);
+#endif  /* CONFIG_HAVE_CLK */
 out_clock_prepare:
+#ifdef CONFIG_HAVE_CLK  // MTK
 	clk_put(kbdev->clock);
+#endif  /* CONFIG_HAVE_CLK */
 #ifdef CONFIG_MALI_PLATFORM_DEVICETREE
 	pm_runtime_disable(kbdev->dev);
 #endif
@@ -3765,6 +3865,10 @@ out:
 
 static int kbase_common_device_remove(struct kbase_device *kbdev)
 {
+#ifdef ENABLE_MTK_MEMINFO
+	mtk_kbase_gpu_memory_debug_remove();
+#endif /* ENABLE_MTK_MEMINFO */
+
 	kbase_ipa_term(kbdev->ipa_ctx);
 	kbase_vinstr_term(kbdev->vinstr_ctx);
 	sysfs_remove_group(&kbdev->dev->kobj, &kbase_attr_group);
@@ -3810,11 +3914,13 @@ static int kbase_common_device_remove(struct kbase_device *kbdev)
 	put_device(kbdev->dev);
 		kbase_common_reg_unmap(kbdev);
 	kbase_device_term(kbdev);
+#ifdef CONFIG_HAVE_CLK  // MTK
 	if (kbdev->clock) {
 		clk_disable_unprepare(kbdev->clock);
 		clk_put(kbdev->clock);
 		kbdev->clock = NULL;
 	}
+#endif  /* CONFIG_HAVE_CLK */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0)) && defined(CONFIG_OF) \
 			&& defined(CONFIG_REGULATOR)
 	regulator_put(kbdev->regulator);

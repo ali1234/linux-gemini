@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kthread.h>
 /*#include <linux/rtpm_prio.h>*/
 
@@ -19,7 +32,7 @@ static int extd_create_path(enum EXT_DISP_PATH_MODE mode, unsigned int session)
 {
 	int ret = 0;
 
-	MULTI_COTRL_LOG("extd_create_path session:%08x, mode:%d", session, mode);
+	MULTI_COTRL_LOG("extd_create_path session:%08x, mode:%d\n", session, mode);
 
 	ext_disp_path_set_mode(mode, session);
 	ret = ext_disp_init(NULL, session);
@@ -86,7 +99,7 @@ static int create_external_display_path(unsigned int session, int mode)
 
 			if (ext_disp_wait_ovl_available(0) > 0) {
 				ovl2mem_init(session);
-				ovl2mem_setlayernum(4);
+				ovl2mem_setlayernum(MEMORY_SESSION_INPUT_LAYER_COUNT);
 			} else {
 				MULTI_COTRL_ERR("mhl path: OVL1 can not be split out!\n");
 				ret = -1;
@@ -124,7 +137,7 @@ static int create_external_display_path(unsigned int session, int mode)
 					extd_create_path(EXTD_DIRECT_LINK_MODE, session);
 				}
 
-				extd_set_layer_num(4, session);
+				extd_set_layer_num(EXTERNAL_SESSION_INPUT_LAYER_COUNT, session);
 			} else {
 				MULTI_COTRL_ERR("mhl path: OVL1 can not be split out!\n");
 				extd_create_path(EXTD_RDMA_DPI_MODE, session);
@@ -141,7 +154,7 @@ static int create_external_display_path(unsigned int session, int mode)
 		}
 	} else if (DISP_SESSION_TYPE(session) == DISP_SESSION_MEMORY && EXTD_OVERLAY_CNT == 0) {
 		MULTI_COTRL_ERR("memory session and ovl time sharing!\n");
-		ovl2mem_setlayernum(4);
+		ovl2mem_setlayernum(MEMORY_SESSION_INPUT_LAYER_COUNT);
 	}
 
 	return ret;

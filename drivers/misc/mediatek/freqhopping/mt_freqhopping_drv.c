@@ -38,7 +38,11 @@ static struct freqhopping_ssc *g_fh_drv_usr_def;
 static unsigned int g_drv_pll_count;
 static int mt_freqhopping_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
+
+
 #if !defined(DISABLE_FREQ_HOPPING)
+
+static unsigned long g_irq_flags;
 
 static struct miscdevice mt_fh_device = {
 	.minor = MISC_DYNAMIC_MINOR,
@@ -252,6 +256,10 @@ static ssize_t freqhopping_userdefine_proc_write(struct file *file, const char *
 	fh_ctl.ssc_setting.dds = p7;
 	/* fh_ctl.ssc_setting.freq = 0; */
 
+	/* Check validity of PLL ID */
+	if (fh_ctl.pll_id >= FH_PLL_COUNT)
+		return -1;
+
 
 	if (p1 == FH_CMD_ENABLE) {
 		ret = mt_fh_enable_usrdef(&fh_ctl);
@@ -332,6 +340,11 @@ static ssize_t freqhopping_status_proc_write(struct file *file, const char *buff
 	fh_ctl.ssc_setting.upbnd = 0;
 	fh_ctl.ssc_setting.lowbnd = 0;
 
+	/* Check validity of PLL ID */
+	if (fh_ctl.pll_id >= FH_PLL_COUNT)
+		return -1;
+
+
 	if (p1 == 0)
 		mt_freqhopping_ioctl(NULL, FH_CMD_DISABLE, (unsigned long)(&fh_ctl));
 	else
@@ -388,6 +401,11 @@ static ssize_t freqhopping_debug_proc_write(struct file *file, const char *buffe
 	fh_ctl.ssc_setting.upbnd = p6;
 	fh_ctl.ssc_setting.lowbnd = p7;
 	/* fh_ctl.ssc_setting.freq = 0; */
+
+	/* Check validity of PLL ID */
+	if (fh_ctl.pll_id >= FH_PLL_COUNT)
+		return -1;
+
 
 	if (cmd < FH_CMD_INTERNAL_MAX_CMD)
 		mt_freqhopping_ioctl(NULL, cmd, (unsigned long)(&fh_ctl));
@@ -649,6 +667,13 @@ int mt_dfs_mpll(unsigned int target_dds)
 }
 EXPORT_SYMBOL(mt_dfs_mpll);
 
+int mt_dfs_general_pll(unsigned int pll_id, unsigned int target_dds)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mt_dfs_general_pll);
+
+
 int mt_is_support_DFS_mode(void)
 {
 	return 0;
@@ -694,6 +719,18 @@ int mt_freqhopping_devctl(unsigned int cmd, void *args)
 	return 0;
 }
 EXPORT_SYMBOL(mt_freqhopping_devctl);
+
+void mt_fh_lock(void)
+{
+}
+EXPORT_SYMBOL(mt_fh_lock);
+
+
+void mt_fh_unlock(void)
+{
+}
+EXPORT_SYMBOL(mt_fh_unlock);
+
 
 #else
 
@@ -837,6 +874,18 @@ int mt_dfs_mempll(unsigned int target_dds)
 }
 EXPORT_SYMBOL(mt_dfs_mempll);
 
+int mt_dfs_general_pll(unsigned int pll_id, unsigned int target_dds)
+{
+	if ((!g_p_fh_hal_drv) || (!g_p_fh_hal_drv->mt_dfs_general_pll)) {
+		FH_MSG("[%s]: g_p_fh_hal_drv->mt_dfs_general_pll is uninitialized.", __func__);
+		return 1;
+	}
+
+	return g_p_fh_hal_drv->mt_dfs_general_pll(pll_id, target_dds);
+
+}
+EXPORT_SYMBOL(mt_dfs_general_pll);
+
 
 int mt_is_support_DFS_mode(void)
 {
@@ -909,5 +958,29 @@ int mt_freqhopping_devctl(unsigned int cmd, void *args)
 
 }
 EXPORT_SYMBOL(mt_freqhopping_devctl);
+
+void mt_fh_lock(void)
+{
+	if (!g_p_fh_hal_drv) {
+		FH_MSG("[%s]: g_p_fh_hal_drv is uninitialized.", __func__);
+		return;
+	}
+
+	g_p_fh_hal_drv->mt_fh_lock(&g_irq_flags);
+}
+EXPORT_SYMBOL(mt_fh_lock);
+
+
+void mt_fh_unlock(void)
+{
+	if (!g_p_fh_hal_drv) {
+		FH_MSG("[%s]: g_p_fh_hal_drv is uninitialized.", __func__);
+		return;
+	}
+
+	g_p_fh_hal_drv->mt_fh_unlock(&g_irq_flags);
+}
+EXPORT_SYMBOL(mt_fh_unlock);
+
 
 #endif

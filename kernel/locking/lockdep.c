@@ -54,6 +54,10 @@
 
 #include "lockdep_internals.h"
 
+#ifdef CONFIG_MTK_LOCK_DEBUG
+#include "sched.h"
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/lock.h>
 
@@ -76,9 +80,17 @@ static void lockdep_aee(void)
 {
 #ifdef CONFIG_MTK_LOCK_DEBUG
 	char aee_str[40];
+	int cpu;
+	struct rq *rq;
 
-	snprintf(aee_str, 40, "[%s]LockProve Warning", current->comm);
-	aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DUMMY_DUMP | DB_OPT_FTRACE, aee_str, "LockProve Debug\n");
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+
+	if (!raw_spin_is_locked(&rq->lock)) {
+		snprintf(aee_str, 40, "[%s]LockProve Warning", current->comm);
+		aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DUMMY_DUMP | DB_OPT_FTRACE,
+			aee_str, "LockProve Debug\n");
+	}
 #else
 	return;
 #endif
@@ -435,6 +447,7 @@ static int save_trace(struct stack_trace *trace)
 			return 0;
 
 		print_lockdep_off("BUG: MAX_STACK_TRACE_ENTRIES too low!");
+		lockdep_aee();
 		dump_stack();
 
 		return 0;
@@ -570,6 +583,7 @@ static void print_lock(struct held_lock *hlock)
 	struct lock_class *lock = hlock_class(hlock);
 
 	if (lock != NULL) {
+		pr_emerg("[%p]", lock->key);
 		print_lock_name(lock);
 		pr_emerg(", at: ");
 		print_ip_sym(hlock->acquire_ip);
@@ -589,8 +603,8 @@ static void lockdep_print_held_locks(struct task_struct *curr)
 	}
 	if (curr->state == TASK_RUNNING)
 		pr_emerg("[Caution!] %s/%d is runable state\n", curr->comm, curr->pid);
-	printk("%d lock%s held by %s/%d:\n",
-		depth, depth > 1 ? "s" : "", curr->comm, task_pid_nr(curr));
+	pr_emerg("%d lock%s held by %s/%d tid:%d:\n",
+		depth, depth > 1 ? "s" : "", curr->comm, task_pid_nr(curr), task_tgid_nr(curr));
 
 	for (i = 0; i < depth; i++) {
 		printk(" #%d: ", i);
@@ -868,6 +882,7 @@ static struct lock_list *alloc_list_entry(void)
 		if (!debug_locks_off_graph_unlock())
 			return NULL;
 
+		lockdep_aee();
 		print_lockdep_off("BUG: MAX_LOCKDEP_ENTRIES too low!");
 		dump_stack();
 		return NULL;

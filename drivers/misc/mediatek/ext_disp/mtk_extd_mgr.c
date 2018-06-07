@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************/
 /*****************************************************************************/
 #include <linux/mm.h>
@@ -13,10 +26,11 @@
 #include <linux/module.h>
 #include <linux/list.h>
 #include <linux/switch.h>
+#include <linux/types.h>
+#include <linux/fb.h>
 
 #include <asm/uaccess.h>
 #include <asm/atomic.h>
-#include <linux/types.h>
 
 #include "extd_log.h"
 #include "extd_utils.h"
@@ -285,15 +299,6 @@ static long mtk_extd_mgr_ioctl(struct file *file, unsigned int cmd, unsigned lon
 			/* /r = hdmi_factory_mode_test(STEP4_DPI_STOP_AND_POWER_OFF, NULL); */
 			break;
 		}
-	case MTK_HDMI_FAKE_PLUG_IN:
-		{
-			int connect = arg & 0x0FF;
-
-			if (extd_driver[DEV_MHL] && extd_driver[DEV_MHL]->fake_connect)
-				extd_driver[DEV_MHL]->fake_connect(connect);
-
-			break;
-		}
 	default:
 		{
 			EXT_MGR_ERR("[EXTD]ioctl(%d) arguments is not support\n", cmd & 0x0ff);
@@ -308,13 +313,13 @@ static long mtk_extd_mgr_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
 static int mtk_extd_mgr_open(struct inode *inode, struct file *file)
 {
-	EXT_MGR_FUNC();
+	/*EXT_MGR_FUNC();*/
 	return 0;
 }
 
 static int mtk_extd_mgr_release(struct inode *inode, struct file *file)
 {
-	EXT_MGR_FUNC();
+	/*EXT_MGR_FUNC();*/
 	return 0;
 }
 
@@ -347,7 +352,7 @@ const struct file_operations external_display_fops = {
 };
 
 static const struct of_device_id extd_of_ids[] = {
-	{.compatible = "mediatek,sii8348-hdmi",},
+	{.compatible = "mediatek,extd_dev",},
 	{}
 };
 
@@ -459,9 +464,48 @@ static struct early_suspend extd_early_suspend_handler = {
 };
 #endif
 
+static int fb_notifier_callback(struct notifier_block *p,
+				unsigned long event, void *data)
+{
+	int i = 0;
+	int blank_mode = 0;
+	struct fb_event *evdata = data;
+
+	if (event != FB_EARLY_EVENT_BLANK)
+		return 0;
+
+	blank_mode = *(int *)evdata->data;
+	EXT_MGR_LOG("[%s] - blank_mode:%d\n", __func__, blank_mode);
+
+	switch (blank_mode) {
+	case FB_BLANK_UNBLANK:
+	case FB_BLANK_NORMAL:
+		for (i = DEV_MHL; i < DEV_MAX_NUM - 1; i++) {
+			if (i != DEV_EINK && extd_driver[i]->power_enable)
+				extd_driver[i]->power_enable(1);
+		}
+
+		break;
+	case FB_BLANK_POWERDOWN:
+		for (i = DEV_MHL; i < DEV_MAX_NUM - 1; i++) {
+			if (i != DEV_EINK && extd_driver[i]->power_enable)
+				extd_driver[i]->power_enable(0);
+		}
+
+		break;
+	default:
+		EXT_MGR_ERR("[%s] - unknown blank mode!\n", __func__);
+	}
+
+	return 0;
+}
+
+static struct notifier_block notifier;
 static int __init mtk_extd_mgr_init(void)
 {
 	int i = 0;
+	int ret = 0;
+/*	struct notifier_block notifier;*/
 
 	EXT_MGR_FUNC();
 
@@ -475,9 +519,14 @@ static int __init mtk_extd_mgr_init(void)
 	}
 
 	if (platform_driver_register(&external_display_driver)) {
-		EXT_MGR_ERR("[EXTD]failed to register mtkfb driver\n");
+		EXT_MGR_ERR("failed to register mtkfb driver\n");
 		return -1;
 	}
+
+	notifier.notifier_call = fb_notifier_callback;
+	ret = fb_register_client(&notifier);
+	if (ret)
+		EXT_MGR_ERR("unable to register fb callback!\n");
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	register_early_suspend(&extd_early_suspend_handler);

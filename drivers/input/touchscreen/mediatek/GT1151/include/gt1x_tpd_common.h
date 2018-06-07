@@ -79,6 +79,13 @@ extern int tpd_em_log;
 #define GTP_INT_TRIGGER  1	/*0:Rising 1:Falling*/
 #define GTP_WAKEUP_LEVEL 1
 #endif
+#ifdef CONFIG_MTK_LCM_PHYSICAL_ROTATION_HW
+#define GTP_WARP_X_ON         1
+#define GTP_WARP_Y_ON         1
+#else
+#define GTP_WARP_X_ON         0
+#define GTP_WARP_Y_ON         0
+#endif
 
 #define GTP_MAX_TOUCH    5
 #ifdef CONFIG_GTP_WITH_STYLUS
@@ -164,13 +171,13 @@ extern int tpd_em_log;
 
 #define GTP_I2C_ADDRESS				0xBA
 
-#ifdef CONFIG_GTP_WARP_X_ON
+#if GTP_WARP_X_ON
 #define GTP_WARP_X(x_max, x) (x_max - 1 - x)
 #else
 #define GTP_WARP_X(x_max, x) x
 #endif
 
-#ifdef CONFIG_GTP_WARP_Y_ON
+#if GTP_WARP_Y_ON
 #define GTP_WARP_Y(y_max, y) (y_max - 1 - y)
 #else
 #define GTP_WARP_Y(y_max, y) y
@@ -179,7 +186,7 @@ extern int tpd_em_log;
 #define IS_NUM_OR_CHAR(x)    (((x) > 'A' && (x) < 'Z') || ((x) > '0' && (x) < '9'))
 
 /*Log define*/
-#define GTP_INFO(fmt, arg...)           pr_warn("<<GTP-INF>>[%s:%d] "fmt"\n", __func__, __LINE__, ##arg)
+#define GTP_INFO(fmt, arg...)           pr_info("<<GTP-INF>>[%s:%d] "fmt"\n", __func__, __LINE__, ##arg)
 #define GTP_ERROR(fmt, arg...)          pr_err("<<GTP-ERR>>[%s:%d] "fmt"\n", __func__, __LINE__, ##arg)
 #define GTP_DEBUG(fmt, arg...)				\
 	do {									\
@@ -284,6 +291,7 @@ extern s32 hotknot_event_handler(u8 *data);
 #endif				/*CONFIG_GTP_HOTKNOT */
 extern s32 gt1x_init_node(void);
 extern bool check_flag;
+
 #ifdef CONFIG_GTP_GESTURE_WAKEUP
 extern DOZE_T gesture_doze_status;
 extern int gesture_enabled;
@@ -299,6 +307,8 @@ extern void gt1x_power_switch(s32 state);
 extern void gt1x_irq_enable(void);
 extern void gt1x_irq_disable(void);
 extern int gt1x_debug_proc(u8 *buf, int count);
+extern int mt_eint_set_deint(int eint_num, int irq_num);
+extern int mt_eint_clr_deint(int eint_num);
 
 struct fw_update_info {
 	int update_type;
@@ -330,7 +340,8 @@ extern void gt1x_leave_update_mode(void);
 extern int gt1x_hold_ss51_dsp_no_reset(void);
 extern int gt1x_load_patch(u8 *patch, u32 patch_size, int offset, int bank_size);
 extern int gt1x_startup_patch(void);
-
+extern void gt1x_auto_update_done(void);
+extern int gt1x_is_tpd_halt(void);
 
 /* Export from gt1x_tool.c */
 #ifdef CONFIG_GTP_CREATE_WR_NODE
@@ -415,5 +426,7 @@ extern bool upmu_is_chr_det(void);
 #endif
 #endif
 extern struct tpd_filter_t tpd_filter;
+extern wait_queue_head_t init_waiter;
+extern u8 is_resetting;
 
 #endif /* GT1X_TPD_COMMON_H__ */

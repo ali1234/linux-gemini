@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -153,7 +155,7 @@ static int mtk_pcm_hp_impedance_params(struct snd_pcm_substream *substream,
 {
 	int ret = 0;
 
-	pr_warn("mtk_pcm_hp_impedance_params\n");
+	/* pr_warn("mtk_pcm_hp_impedance_params\n"); */
 
 	/* runtime->dma_bytes has to be set manually to allow mmap */
 	substream->runtime->dma_bytes = params_buffer_bytes(hw_params);
@@ -170,7 +172,7 @@ static int mtk_pcm_hp_impedance_params(struct snd_pcm_substream *substream,
 
 static int mtk_pcm_hp_impedance_hw_free(struct snd_pcm_substream *substream)
 {
-	PRINTK_AUDDRV("mtk_pcm_hp_impedance_hw_free\n");
+	/* PRINTK_AUDDRV("mtk_pcm_hp_impedance_hw_free\n"); */
 	return 0;
 }
 
@@ -201,8 +203,8 @@ static int mtk_pcm_hp_impedance_open(struct snd_pcm_substream *substream)
 		PRINTK_AUDDRV("snd_pcm_hw_constraint_integer failed\n");
 
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		PRINTK_AUDDRV("SNDRV_PCM_STREAM_PLAYBACK mtkalsa_playback_constraints\n");
+	/* if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		PRINTK_AUDDRV("SNDRV_PCM_STREAM_PLAYBACK mtkalsa_playback_constraints\n"); */
 
 	if (ret < 0) {
 		PRINTK_AUDDRV("mtk_soc_pcm_hp_impedance_close\n");
@@ -225,8 +227,6 @@ static int mtk_pcm_hp_impedance_prepare(struct snd_pcm_substream *substream)
 		    runtime->format == SNDRV_PCM_FORMAT_U32_LE) {
 			SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL1,
 						     AFE_WLEN_32_BIT_ALIGN_8BIT_0_24BIT_DATA);
-			SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL2,
-						     AFE_WLEN_32_BIT_ALIGN_8BIT_0_24BIT_DATA);
 			SetoutputConnectionFormat(OUTPUT_DATA_FORMAT_24BIT,
 						  Soc_Aud_InterConnectionOutput_O03);
 			SetoutputConnectionFormat(OUTPUT_DATA_FORMAT_24BIT,
@@ -234,8 +234,6 @@ static int mtk_pcm_hp_impedance_prepare(struct snd_pcm_substream *substream)
 			mI2SWLen = Soc_Aud_I2S_WLEN_WLEN_32BITS;
 		} else {
 			SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL1,
-						     AFE_WLEN_16_BIT);
-			SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL2,
 						     AFE_WLEN_16_BIT);
 			SetoutputConnectionFormat(OUTPUT_DATA_FORMAT_16BIT,
 						  Soc_Aud_InterConnectionOutput_O03);

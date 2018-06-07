@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -85,7 +98,7 @@
 #define CV_CHECK_DELAT_FOR_BANDGAP	80	/* 80mV */
 #if defined(CONFIG_MTK_PUMP_EXPRESS_SUPPORT)
 #define BJT_LIMIT			1200000	/* 1.2W */
-#ifndef TA_START_VCHR_TUNUNG_VOLTAG
+#ifndef TA_START_VCHR_TUNUNG_VOLTAGE
 #define TA_START_VCHR_TUNUNG_VOLTAGE	3700	/* for isink blink issue */
 #define TA_CHARGING_CURRENT		CHARGE_CURRENT_1500_00_MA
 #endif				/* TA_START_VCHR_TUNUNG_VOLTAG */
@@ -640,10 +653,8 @@ static BATTERY_VOLTAGE_ENUM select_jeita_cv(void)
 
 PMU_STATUS do_jeita_state_machine(void)
 {
-	int previous_g_temp_status;
 	BATTERY_VOLTAGE_ENUM cv_voltage;
 
-	previous_g_temp_status = g_temp_status;
 	/* JEITA battery temp Standard */
 	if (BMT_status.temperature >= TEMP_POS_60_THRESHOLD) {
 		battery_log(BAT_LOG_CRTI,
@@ -736,15 +747,12 @@ PMU_STATUS do_jeita_state_machine(void)
 		return PMU_STATUS_FAIL;
 	}
 
-	/* set CV after temperature changed */
-	if (g_temp_status != previous_g_temp_status) {
-		cv_voltage = select_jeita_cv();
-		battery_charging_control(CHARGING_CMD_SET_CV_VOLTAGE, &cv_voltage);
+	cv_voltage = select_jeita_cv();
+	battery_charging_control(CHARGING_CMD_SET_CV_VOLTAGE, &cv_voltage);
 
-		#if defined(CONFIG_MTK_HAFG_20)
-		g_cv_voltage = cv_voltage;
-		#endif
-	}
+#if defined(CONFIG_MTK_HAFG_20)
+	g_cv_voltage = cv_voltage;
+#endif
 
 	return PMU_STATUS_OK;
 }
@@ -831,12 +839,23 @@ unsigned int set_bat_charging_current_limit(int current_limit)
 			g_temp_CC_value = CHARGE_CURRENT_1600_00_MA;
 		else
 			g_temp_CC_value = CHARGE_CURRENT_450_00_MA;
+
+		if (BMT_status.charger_type == STANDARD_HOST)
+			if ((current_limit * 100) >= CHARGE_CURRENT_500_00_MA) {
+				g_temp_CC_value = USB_CHARGER_CURRENT;
+				battery_log(BAT_LOG_CRTI,
+		"[BATTERY] set_bat_charging_current_limit over usb spec(%d,%d)\r\n",
+				current_limit * 100, g_temp_CC_value);
+			}
+
+
+
 	} else {
 		/* change to default current setting */
 		g_bcct_flag = 0;
 	}
 
-	wake_up_bat();
+	wake_up_bat3();
 
 	return g_bcct_flag;
 }
@@ -1077,7 +1096,7 @@ static void pchr_turn_on_charging(void)
 		battery_pump_express_algorithm_start();
 #endif
 
-		/* Set Charging Current */
+		/* Set Charging Current
 		if (get_usb_current_unlimited()) {
 			g_temp_CC_value = batt_cust_data.ac_charger_current;
 			battery_log(BAT_LOG_FULL,
@@ -1087,6 +1106,22 @@ static void pchr_turn_on_charging(void)
 				battery_log(BAT_LOG_FULL,
 					    "[BATTERY] select_charging_curret_bcct !\n");
 				select_charging_curret_bcct();
+			} else {
+				battery_log(BAT_LOG_FULL, "[BATTERY] select_charging_current !\n");
+				select_charging_curret();
+			}
+		}*/
+
+		/* Set Charging Current */
+		if (g_bcct_flag == 1) {
+			battery_log(BAT_LOG_FULL,
+					"[BATTERY] select_charging_curret_bcct !\n");
+			select_charging_curret_bcct();
+		} else {
+			if (get_usb_current_unlimited()) {
+				g_temp_CC_value = batt_cust_data.ac_charger_current;
+				battery_log(BAT_LOG_FULL,
+						"USB_CURRENT_UNLIMITED, use AC_CHARGER_CURRENT\n");
 			} else {
 				battery_log(BAT_LOG_FULL, "[BATTERY] select_charging_current !\n");
 				select_charging_curret();
@@ -1370,4 +1405,5 @@ void mt_battery_charging_algorithm(void)
 		break;
 	}
 
+	battery_charging_control(CHARGING_CMD_DUMP_REGISTER, NULL);
 }

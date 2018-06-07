@@ -1,3 +1,15 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 #include "precomp.h"
 #include "p2p_role_state.h"
 
@@ -394,6 +406,11 @@ p2pRoleFsmRunEventDeauthTxDone(IN P_ADAPTER_T prAdapter,
 		}
 
 		prP2pBssInfo = prAdapter->aprBssInfo[prMsduInfo->ucBssIndex];
+		/* Change station state. */
+		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
+
+		/* Reset Station Record Status. */
+		p2pFuncResetStaRecStatus(prAdapter, prStaRec);
 
 		/* Try to remove StaRec in BSS client list before free it */
 		bssRemoveClient(prAdapter, prP2pBssInfo, prStaRec);
@@ -419,6 +436,8 @@ VOID p2pRoleFsmRunEventRxDeauthentication(IN P_ADAPTER_T prAdapter, IN P_STA_REC
 {
 	P_BSS_INFO_T prP2pBssInfo = (P_BSS_INFO_T) NULL;
 	UINT_16 u2ReasonCode = 0;
+	P_P2P_INFO_T prP2pInfo;
+	UINT_32 u4CurrentTime;
 
 	do {
 		ASSERT_BREAK((prAdapter != NULL) && (prSwRfb != NULL));
@@ -438,6 +457,17 @@ VOID p2pRoleFsmRunEventRxDeauthentication(IN P_ADAPTER_T prAdapter, IN P_STA_REC
 
 		switch (prP2pBssInfo->eCurrentOPMode) {
 		case OP_MODE_INFRASTRUCTURE:
+			prP2pInfo = prAdapter->prP2pInfo;
+			if (prP2pInfo->fgWaitEapFailure) {
+				u4CurrentTime = kalGetTimeTick();
+				if (TIME_BEFORE(u4CurrentTime, prP2pInfo->u4EapWscDoneTxTime + MSEC_TO_SYSTIME(500))) {
+					DBGLOG(P2P, INFO, "Waiting EAP-Failure, ignore Deauth frame\n");
+					break;
+				}
+				DBGLOG(P2P, INFO, "Should ignore Deauth frame while waiting EAP-failure %d:%d\n",
+					u4CurrentTime, prP2pInfo->u4EapWscDoneTxTime + MSEC_TO_SYSTIME(500));
+			}
+
 			if (authProcessRxDeauthFrame(prSwRfb,
 						     prStaRec->aucMacAddr, &u2ReasonCode) == WLAN_STATUS_SUCCESS) {
 				P_WLAN_DEAUTH_FRAME_T prDeauthFrame = (P_WLAN_DEAUTH_FRAME_T) prSwRfb->pvHeader;
@@ -448,8 +478,6 @@ VOID p2pRoleFsmRunEventRxDeauthentication(IN P_ADAPTER_T prAdapter, IN P_STA_REC
 
 				prStaRec->u2ReasonCode = u2ReasonCode;
 				u2IELength = prSwRfb->u2PacketLen - (WLAN_MAC_HEADER_LEN + REASON_CODE_FIELD_LEN);
-
-				ASSERT(prP2pBssInfo->prStaRecOfAP == prStaRec);
 
 				/* Indicate disconnect to Host. */
 				kalP2PGCIndicateConnectionStatus(prAdapter->prGlueInfo,
@@ -525,6 +553,8 @@ VOID p2pRoleFsmRunEventRxDisassociation(IN P_ADAPTER_T prAdapter, IN P_STA_RECOR
 {
 	P_BSS_INFO_T prP2pBssInfo = (P_BSS_INFO_T) NULL;
 	UINT_16 u2ReasonCode = 0;
+	P_P2P_INFO_T prP2pInfo;
+	UINT_32 u4CurrentTime;
 
 	do {
 		ASSERT_BREAK((prAdapter != NULL) && (prSwRfb != NULL));
@@ -543,14 +573,23 @@ VOID p2pRoleFsmRunEventRxDisassociation(IN P_ADAPTER_T prAdapter, IN P_STA_RECOR
 
 		switch (prP2pBssInfo->eCurrentOPMode) {
 		case OP_MODE_INFRASTRUCTURE:
+			prP2pInfo = prAdapter->prP2pInfo;
+			if (prP2pInfo->fgWaitEapFailure) {
+				u4CurrentTime = kalGetTimeTick();
+				if (TIME_BEFORE(u4CurrentTime, prP2pInfo->u4EapWscDoneTxTime + MSEC_TO_SYSTIME(500))) {
+					DBGLOG(P2P, INFO, "Waiting EAP-Failure, ignore Disassoc frame\n");
+					break;
+				}
+				DBGLOG(P2P, INFO, "Should ignore disassoc frame while waiting EAP-failure %d:%d\n",
+					u4CurrentTime, prP2pInfo->u4EapWscDoneTxTime + MSEC_TO_SYSTIME(500));
+			}
+
 			if (assocProcessRxDisassocFrame(prAdapter,
 							prSwRfb,
 							prStaRec->aucMacAddr,
 							&prStaRec->u2ReasonCode) == WLAN_STATUS_SUCCESS) {
 				P_WLAN_DISASSOC_FRAME_T prDisassocFrame = (P_WLAN_DISASSOC_FRAME_T) prSwRfb->pvHeader;
 				UINT_16 u2IELength = 0;
-
-				ASSERT(prP2pBssInfo->prStaRecOfAP == prStaRec);
 
 				if (prP2pBssInfo->prStaRecOfAP != prStaRec)
 					break;
@@ -617,7 +656,13 @@ VOID p2pRoleFsmRunEventRxDisassociation(IN P_ADAPTER_T prAdapter, IN P_STA_RECOR
 			break;
 		case OP_MODE_P2P_DEVICE:
 		default:
-			ASSERT(FALSE);
+			DBGLOG(P2P, INFO, "RX Disassoc unexpectedly. Current role: %d\n",
+				prP2pBssInfo->eCurrentOPMode);
+			/*
+			 * Can not expect peer not send disassoc to us when we
+			 * are not ready to process disassoc
+			 * ASSERT(FALSE);
+			 */
 			break;
 		}
 
@@ -678,6 +723,7 @@ VOID p2pRoleFsmRunEventStartAP(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr
 	P_P2P_CONNECTION_REQ_INFO_T prP2pConnReqInfo = (P_P2P_CONNECTION_REQ_INFO_T) NULL;
 	P_BSS_INFO_T prP2pBssInfo = (P_BSS_INFO_T) NULL;
 	P_P2P_SPECIFIC_BSS_INFO_T prP2pSpecificBssInfo = (P_P2P_SPECIFIC_BSS_INFO_T) NULL;
+	P_P2P_DEV_FSM_INFO_T prP2pDevFsmInfo = (P_P2P_DEV_FSM_INFO_T) NULL;
 
 	do {
 		ASSERT_BREAK((prAdapter != NULL) && (prMsgHdr != NULL));
@@ -687,12 +733,18 @@ VOID p2pRoleFsmRunEventStartAP(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr
 		prP2pStartAPMsg = (P_MSG_P2P_START_AP_T) prMsgHdr;
 
 		prP2pRoleFsmInfo = P2P_ROLE_INDEX_2_ROLE_FSM_INFO(prAdapter, prP2pStartAPMsg->ucRoleIdx);
+		prP2pDevFsmInfo = prAdapter->rWifiVar.prP2pDevFsmInfo;
 
 		if (!prP2pRoleFsmInfo) {
 			DBGLOG(P2P, ERROR,
 			       "p2pRoleFsmRunEventStartAP: Corresponding P2P Role FSM empty: %d.\n",
 				prP2pStartAPMsg->ucRoleIdx);
 			break;
+		}
+
+		if (prP2pDevFsmInfo->eCurrentState != P2P_DEV_STATE_IDLE) {
+			DBGLOG(P2P, INFO, "Going to DEV_IDLE as role FSM running\n");
+			p2pDevFsmRunEventAbort(prAdapter, prP2pDevFsmInfo);
 		}
 
 		prP2pBssInfo = prAdapter->aprBssInfo[prP2pRoleFsmInfo->ucBssIndex];
@@ -738,7 +790,7 @@ VOID p2pRoleFsmRunEventStartAP(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr
 			prP2pConnReqInfo->eConnRequest = P2P_CONNECTION_TYPE_GO;
 		}
 
-		prP2pBssInfo->eHiddenSsidType = prP2pStartAPMsg->ucHiddenSsidType;
+		prP2pBssInfo->eHiddenSsidType = prP2pStartAPMsg->eHiddenSsidType;
 
 		if ((prP2pBssInfo->eCurrentOPMode != OP_MODE_ACCESS_POINT) ||
 		    (prP2pBssInfo->eIntendOPMode != OP_MODE_NUM)) {
@@ -915,6 +967,10 @@ VOID p2pRoleFsmRunEventConnectionRequest(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_
 			prChnlReqInfo->eChannelWidth = prJoinInfo->prTargetBssDesc->eChannelWidth;
 			prChnlReqInfo->ucCenterFreqS1 = prJoinInfo->prTargetBssDesc->ucCenterFreqS1;
 			prChnlReqInfo->ucCenterFreqS2 = prJoinInfo->prTargetBssDesc->ucCenterFreqS2;
+			if (prP2pBssInfo->eBand != prChnlReqInfo->eBand)
+				prP2pBssInfo->eBand = prChnlReqInfo->eBand;
+			DBGLOG(P2P, INFO, "prP2pBssInfo->eBand=%d, prChnlReqInfo->eBand=%d.\n",
+				prP2pBssInfo->eBand, prChnlReqInfo->eBand);
 
 			p2pRoleFsmStateTransition(prAdapter, prP2pRoleFsmInfo, P2P_ROLE_STATE_REQING_CHANNEL);
 		}
@@ -942,7 +998,7 @@ VOID p2pRoleFsmRunEventConnectionAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T 
 
 		prP2pRoleFsmInfo = P2P_ROLE_INDEX_2_ROLE_FSM_INFO(prAdapter, prDisconnMsg->ucRoleIdx);
 
-		DBGLOG(P2P, TRACE, "p2pFsmRunEventConnectionAbort: Connection Abort.\n");
+		DBGLOG(P2P, INFO, "p2pFsmRunEventConnectionAbort: Connection Abort.\n");
 
 		if (!prP2pRoleFsmInfo) {
 			DBGLOG(P2P, ERROR,
@@ -1418,6 +1474,10 @@ p2pRoleFsmRunEventChnlGrant(IN P_ADAPTER_T prAdapter,
 
 				p2pRoleFsmStateTransition(prAdapter, prP2pRoleFsmInfo, eNextState);
 				break;
+			case P2P_ROLE_STATE_IDLE:
+				DBGLOG(P2P, WARN, "Ignore channel grant event when in ROLE IDLE\n");
+				p2pFuncReleaseCh(prAdapter, prP2pRoleFsmInfo->ucBssIndex, prChnlReqInfo);
+				break;
 			default:
 				/* Channel is granted under unexpected state.
 				 * Driver should cancel channel privileagea before leaving the states.
@@ -1570,13 +1630,14 @@ VOID p2pRoleFsmRunEventSwitchOPMode(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prM
 	P_P2P_ROLE_FSM_INFO_T prP2pRoleFsmInfo = (P_P2P_ROLE_FSM_INFO_T) NULL;
 
 	do {
-		ASSERT(prSwitchOpMode->ucRoleIdx < BSS_P2P_NUM);
-
 		ASSERT_BREAK((prAdapter != NULL) && (prSwitchOpMode != NULL));
 
 		DBGLOG(P2P, TRACE, "p2pRoleFsmRunEventSwitchOPMode\n");
 
-		prP2pRoleFsmInfo = prAdapter->rWifiVar.aprP2pRoleFsmInfo[prSwitchOpMode->ucRoleIdx];
+		if (prSwitchOpMode->ucRoleIdx < BSS_P2P_NUM)
+			prP2pRoleFsmInfo = prAdapter->rWifiVar.aprP2pRoleFsmInfo[prSwitchOpMode->ucRoleIdx];
+		else
+			ASSERT(FALSE);
 
 		ASSERT(prP2pRoleFsmInfo->ucBssIndex < P2P_DEV_BSS_INDEX);
 
@@ -1619,21 +1680,17 @@ VOID p2pFsmRunEventBeaconUpdate(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHd
 
 		prBcnUpdateInfo = &(prRoleP2pFsmInfo->rBeaconUpdateInfo);
 
-		p2pFuncBeaconUpdate(prAdapter,
-				    prP2pBssInfo,
-				    prBcnUpdateInfo,
-				    prBcnUpdateMsg->pucBcnHdr,
-				    prBcnUpdateMsg->u4BcnHdrLen,
-				    prBcnUpdateMsg->pucBcnBody, prBcnUpdateMsg->u4BcnBodyLen);
+		p2pFuncProcessBeacon(prAdapter,
+				     prP2pBssInfo,
+				     prBcnUpdateInfo,
+				     prBcnUpdateMsg->pucBcnHdr,
+				     prBcnUpdateMsg->u4BcnHdrLen,
+				     prBcnUpdateMsg->pucBcnBody, prBcnUpdateMsg->u4BcnBodyLen);
 
 		if ((prP2pBssInfo->eCurrentOPMode == OP_MODE_ACCESS_POINT) &&
 		    (prP2pBssInfo->eIntendOPMode == OP_MODE_NUM)) {
 			/* AP is created, Beacon Update. */
-			/* nicPmIndicateBssAbort(prAdapter, NETWORK_TYPE_P2P_INDEX); */
-
 			bssUpdateBeaconContent(prAdapter, prRoleP2pFsmInfo->ucBssIndex);
-
-			/* nicPmIndicateBssCreated(prAdapter, NETWORK_TYPE_P2P_INDEX); */
 		}
 
 	} while (FALSE);

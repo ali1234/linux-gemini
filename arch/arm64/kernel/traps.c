@@ -37,7 +37,7 @@
 #include <asm/stacktrace.h>
 #include <asm/exception.h>
 #include <asm/system_misc.h>
-#include <mt-plat/mt_hooks.h>
+#include <mt-plat/mtk_hooks.h>
 
 static const char *handler[]= {
 	"Synchronous Abort",
@@ -237,7 +237,8 @@ void die(const char *str, struct pt_regs *regs, int err)
 
 	bust_spinlocks(0);
 	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
-	raw_spin_unlock_irq(&die_lock);
+	/* keep preemption/irq disabled in KE flow to prevent context switch*/
+	/*raw_spin_unlock_irq(&die_lock);*/
 	oops_exit();
 
 	if (in_interrupt())
@@ -289,8 +290,10 @@ static int call_undef_hook(struct pt_regs *regs)
 	int (*fn)(struct pt_regs *regs, unsigned int instr) = arm_undefinstr_retry;
 	void __user *pc = (void __user *)instruction_pointer(regs);
 
-	if (!user_mode(regs))
-		return 1;
+	if (!user_mode(regs)) {
+		instr = *(u32 *)pc;
+		return fn ? fn(regs, instr) : 1;
+	}
 
 	if (compat_thumb_mode(regs)) {
 		/* 16-bit Thumb instruction */

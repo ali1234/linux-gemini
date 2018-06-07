@@ -41,8 +41,13 @@
 #include <mali_kbase_hw.h>
 #include <mali_kbase_mmu_hw.h>
 #include <mali_kbase_hwaccess_jm.h>
+#include <mali_kbase_debug_gpu_mem_mapping.h>
 
 #define KBASE_MMU_PAGE_ENTRIES 512
+
+#ifdef ENABLE_MTK_MEMINFO
+extern atomic_t g_mtk_gpu_total_memory_usage_in_pages;
+#endif /* ENABLE_MTK_MEMINFO */
 
 /**
  * kbase_mmu_sync_pgd - sync page directory to memory
@@ -302,6 +307,7 @@ void page_fault_worker(struct work_struct *data)
 	}
 
 fault_done:
+
 	/*
 	 * By this point, the fault was handled in some way,
 	 * so release the ctx refcount
@@ -309,6 +315,9 @@ fault_done:
 	kbasep_js_runpool_release_ctx(kbdev, kctx);
 
 	atomic_dec(&kbdev->faults_pending);
+
+	
+		
 }
 
 phys_addr_t kbase_mmu_alloc_pgd(struct kbase_context *kctx)
@@ -320,6 +329,10 @@ phys_addr_t kbase_mmu_alloc_pgd(struct kbase_context *kctx)
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 	kbase_atomic_add_pages(1, &kctx->used_pages);
 	kbase_atomic_add_pages(1, &kctx->kbdev->memdev.used_pages);
+
+#ifdef ENABLE_MTK_MEMINFO
+	kbase_atomic_add_pages(1, &g_mtk_gpu_total_memory_usage_in_pages);
+#endif /* ENABLE_MTK_MEMINFO */
 
 	p = kbase_mem_pool_alloc(&kctx->mem_pool);
 	if (!p)
@@ -344,6 +357,10 @@ alloc_free:
 sub_pages:
 	kbase_atomic_sub_pages(1, &kctx->used_pages);
 	kbase_atomic_sub_pages(1, &kctx->kbdev->memdev.used_pages);
+
+#ifdef ENABLE_MTK_MEMINFO
+	kbase_atomic_sub_pages(1, &g_mtk_gpu_total_memory_usage_in_pages);
+#endif /* ENABLE_MTK_MEMINFO */
 
 	return 0;
 }
@@ -507,7 +524,7 @@ static void mmu_insert_pages_failure_recovery(struct kbase_context *kctx, u64 vp
 		kunmap_atomic(pgd_page);
 	}
 }
-
+extern bool kbase_debug_gpu_mem_mapping_check_pa(u64 pa);
 /*
  * Map the single page 'phys' 'nr' of times, starting at GPU PFN 'vpfn'
  */
@@ -579,6 +596,9 @@ int kbase_mmu_insert_single_page(struct kbase_context *kctx, u64 vpfn,
 			KBASE_DEBUG_ASSERT(0 == (pgd_page[ofs] & 1UL));
 			kctx->kbdev->mmu_mode->entry_set_ate(&pgd_page[ofs],
 					phys, flags);
+			kctx->map_pa_trace[0][kctx->map_pa_trace_index] = vpfn;
+			kctx->map_pa_trace[1][kctx->map_pa_trace_index] = phys;
+			kctx->map_pa_trace_index = (kctx->map_pa_trace_index+1)%TRACE_MAP_COUNT;
 		}
 
 		vpfn += count;
@@ -670,8 +690,11 @@ int kbase_mmu_insert_pages(struct kbase_context *kctx, u64 vpfn,
 			KBASE_DEBUG_ASSERT(0 == (pgd_page[ofs] & 1UL));
 			kctx->kbdev->mmu_mode->entry_set_ate(&pgd_page[ofs],
 					phys[i], flags);
+			kctx->map_pa_trace[0][kctx->map_pa_trace_index] = vpfn;
+			kctx->map_pa_trace[1][kctx->map_pa_trace_index] = phys[i];
+			kctx->map_pa_trace_index = (kctx->map_pa_trace_index+1)%TRACE_MAP_COUNT;
 		}
-
+		
 		phys += count;
 		vpfn += count;
 		nr -= count;
@@ -688,6 +711,7 @@ int kbase_mmu_insert_pages(struct kbase_context *kctx, u64 vpfn,
 		recover_required = true;
 		recover_count += count;
 	}
+
 	return 0;
 }
 
@@ -746,7 +770,7 @@ static void kbase_mmu_flush(struct kbase_context *kctx, u64 vpfn, size_t nr)
 					/* Flush failed to complete, assume the
 					 * GPU has hung and perform a reset to
 					 * recover */
-					dev_err(kbdev->dev, "Flush for GPU page table update did not complete. Issueing GPU soft-reset to recover\n");
+					dev_MTK_err(kbdev->dev, "Flush for GPU page table update did not complete. Issueing GPU soft-reset to recover\n");
 					if (kbase_prepare_to_reset_gpu(kbdev))
 						kbase_reset_gpu(kbdev);
 				}
@@ -818,8 +842,12 @@ int kbase_mmu_teardown_pages(struct kbase_context *kctx, u64 vpfn, size_t nr)
 			return -ENOMEM;
 		}
 
-		for (i = 0; i < count; i++)
+		for (i = 0; i < count; i++) {
+			kctx->unmap_pa_trace[0][kctx->unmap_pa_trace_index] = vpfn;
+			kctx->unmap_pa_trace[1][kctx->unmap_pa_trace_index] = pgd_page[index + i];
+			kctx->unmap_pa_trace_index = (kctx->unmap_pa_trace_index+1)%TRACE_MAP_COUNT;
 			mmu_mode->entry_invalidate(&pgd_page[index + i]);
+		}
 
 		vpfn += count;
 		nr -= count;
@@ -890,9 +918,13 @@ int kbase_mmu_update_pages(struct kbase_context *kctx, u64 vpfn, phys_addr_t *ph
 			return -ENOMEM;
 		}
 
-		for (i = 0; i < count; i++)
+		for (i = 0; i < count; i++) {
 			mmu_mode->entry_set_ate(&pgd_page[index + i], phys[i],
 					flags);
+			kctx->map_pa_trace[0][kctx->map_pa_trace_index] = vpfn;
+			kctx->map_pa_trace[1][kctx->map_pa_trace_index] = phys[i];
+			kctx->map_pa_trace_index = (kctx->map_pa_trace_index+1)%TRACE_MAP_COUNT;
+		}
 
 		phys += count;
 		vpfn += count;
@@ -971,6 +1003,11 @@ static void mmu_teardown_level(struct kbase_context *kctx, phys_addr_t pgd, int 
 				kbase_process_page_usage_dec(kctx, 1);
 				kbase_atomic_sub_pages(1, &kctx->used_pages);
 				kbase_atomic_sub_pages(1, &kctx->kbdev->memdev.used_pages);
+
+#ifdef ENABLE_MTK_MEMINFO
+				kbase_atomic_sub_pages(1, &g_mtk_gpu_total_memory_usage_in_pages);
+#endif /* ENABLE_MTK_MEMINFO */
+
 			}
 		}
 	}
@@ -1013,6 +1050,11 @@ void kbase_mmu_free_pgd(struct kbase_context *kctx)
 	kbase_process_page_usage_dec(kctx, 1);
 	kbase_atomic_sub_pages(1, &kctx->used_pages);
 	kbase_atomic_sub_pages(1, &kctx->kbdev->memdev.used_pages);
+
+#ifdef ENABLE_MTK_MEMINFO
+	kbase_atomic_sub_pages(1, &g_mtk_gpu_total_memory_usage_in_pages);
+#endif /* ENABLE_MTK_MEMINFO */
+
 }
 
 KBASE_EXPORT_TEST_API(kbase_mmu_free_pgd);
@@ -1176,7 +1218,7 @@ void bus_fault_worker(struct work_struct *data)
 		 * We start the reset before switching to UNMAPPED to ensure that unrelated jobs
 		 * are evicted from the GPU before the switch.
 		 */
-		dev_err(kbdev->dev, "GPU bus error occurred. For this GPU version we now soft-reset as part of bus error recovery\n");
+		dev_MTK_err(kbdev->dev, "GPU bus error occurred. For this GPU version we now soft-reset as part of bus error recovery\n");
 		reset_status = kbase_prepare_to_reset_gpu(kbdev);
 	}
 #endif /* KBASE_GPU_RESET_EN */
@@ -1378,7 +1420,7 @@ static void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 	source_id = (as->fault_status >> 16);
 
 	/* terminal fault, print info about the fault */
-	dev_err(kbdev->dev,
+	dev_MTK_err(kbdev->dev,
 		"Unhandled Page fault in AS%d at VA 0x%016llX\n"
 		"Reason: %s\n"
 		"raw fault status 0x%X\n"
@@ -1395,6 +1437,7 @@ static void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 		access_type, access_type_name(kbdev, as->fault_status),
 		source_id,
 		kctx->pid);
+	kbase_debug_gpu_mem_mapping(kctx, as->fault_addr);
 
 	/* hardware counters dump fault handling */
 	if ((kbdev->hwcnt.kctx) && (kbdev->hwcnt.kctx->as_nr == as_no) &&
@@ -1425,7 +1468,7 @@ static void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 		 * We start the reset before switching to UNMAPPED to ensure that unrelated jobs
 		 * are evicted from the GPU before the switch.
 		 */
-		dev_err(kbdev->dev, "Unhandled page fault. For this GPU version we now soft-reset the GPU as part of page fault recovery.");
+		dev_MTK_err(kbdev->dev, "Unhandled page fault. For this GPU version we now soft-reset the GPU as part of page fault recovery.");
 		reset_status = kbase_prepare_to_reset_gpu(kbdev);
 	}
 #endif /* KBASE_GPU_RESET_EN */
@@ -1639,7 +1682,7 @@ void kbase_mmu_interrupt_process(struct kbase_device *kbdev, struct kbase_contex
 			 * earlier error hasn't been properly cleared by this
 			 * point.
 			 */
-			dev_err(kbdev->dev, "GPU bus error occurred. For this GPU version we now soft-reset as part of bus error recovery\n");
+			dev_MTK_err(kbdev->dev, "GPU bus error occurred. For this GPU version we now soft-reset as part of bus error recovery\n");
 			reset_status = kbase_prepare_to_reset_gpu_locked(kbdev);
 			if (reset_status)
 				kbase_reset_gpu_locked(kbdev);
@@ -1684,6 +1727,7 @@ void kbase_mmu_interrupt_process(struct kbase_device *kbdev, struct kbase_contex
 		queue_work(as->pf_wq, &as->work_pagefault);
 		atomic_inc(&kbdev->faults_pending);
 	}
+
 }
 
 void kbase_flush_mmu_wqs(struct kbase_device *kbdev)

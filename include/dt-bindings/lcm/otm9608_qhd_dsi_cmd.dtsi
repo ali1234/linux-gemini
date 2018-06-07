@@ -11,7 +11,7 @@
 / {
 	/* LCM standardization */
 	lcm_params {
-		compatible = "mediatek,lcm_params-otm9608_qhd_dsi_cmd";
+		compatible = "mediatek,lcm_params-otm9608a_qhd_dsi_cmd";
 
 		lcm_params-types = <2 0 0 0>;
 		/* type, ctrl, lcm_if, lcm_cmd_if */
@@ -183,12 +183,14 @@
 		lcm_params-dsi-vertical_vfp_lp;
 		lcm_params-physical_width;
 		lcm_params-physical_height;
+		lcm_params-physical_width_um;
+		lcm_params-physical_height_um;
 		lcm_params-od_table_size;
 		lcm_params-od_table;
 	};
 
 	lcm_ops {
-		compatible = "mediatek,lcm_ops-otm9608_qhd_dsi_cmd";
+		compatible = "mediatek,lcm_ops-otm9608a_qhd_dsi_cmd";
 
 		init = <LCM_FUNC_UTIL LCM_UTIL_RESET 1 LCM_UTIL_RESET_LOW>,
 			<LCM_FUNC_UTIL LCM_UTIL_MDELAY 1 10>,

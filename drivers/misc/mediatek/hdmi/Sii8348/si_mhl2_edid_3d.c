@@ -79,6 +79,11 @@ timing_mode_from_data_sheet_t timing_modes_from_data_sheet[]=
 	,{2750,1125, 74250000,{0,0},"1080p,24/30"}
 	,{2640,1125,148500000,{0,0},"1080p50"}
 	,{2200,1125,148500000,{0,0},"1080p60"}
+#ifdef MHL2_ENHANCED_MODE_SUPPORT
+	,{1650,2250, 89100000,{0,0},"4Kp24"} //,{1650,2250, 89100000,{0,0},"4Kp24"}
+	,{1474,2250, 99500000,{0,0},"4Kp30"} //,{1474,2250, 89100000,{0,0},"4Kp30"}
+	,{1760,2250, 99000000,{0,0},"4Kp25"} //,{1474,2250, 89100000,{0,0},"4Kp30"}
+#endif // MHL2_ENHANCED_MODE_SUPPORT
 };
 
 void display_timing_enumeration_begin(edid_3d_data_p mhl_edid_3d_data)
@@ -211,6 +216,17 @@ VIC_info_t VIC_info[]=
 	,CEA_861_D_VIC_info_entry(62,1280, 720,370,30, 30000 ,iar_16_to_9  ,vsm_progressive,par_1_to_1             ,vif_dual_frame_rate  ,0,0)
 	,CEA_861_D_VIC_info_entry(63,1920,1080,280,45,120000 ,iar_16_to_9  ,vsm_progressive,par_1_to_1             ,vif_dual_frame_rate  ,0,0)
 	,CEA_861_D_VIC_info_entry(64,1920,1080,280,45,100000 ,iar_16_to_9  ,vsm_progressive,par_1_to_1             ,vif_single_frame_rate,0,0)
+#ifdef MHL2_ENHANCED_MODE_SUPPORT
+	// Actually use the slot for VIC number 93
+	, CEA_861_D_VIC_info_entry(93, 1280, 2160, 370, 90, 24000 , iar_16_to_9	,
+		vsm_progressive, par_1_to_1			, vif_single_frame_rate, 0, 0)
+	// Actually use the slot for VIC number 94
+	, CEA_861_D_VIC_info_entry(94, 1280, 2160, 480, 90, 25000 , iar_16_to_9	,
+		vsm_progressive, par_1_to_1			, vif_single_frame_rate, 0, 0)
+	// Actually use the slot for VIC number 95
+	, CEA_861_D_VIC_info_entry(95, 1280, 2160, 194, 90, 30000 , iar_16_to_9	,
+		vsm_progressive, par_1_to_1			, vif_single_frame_rate, 0, 0)
+#endif // MHL2_ENHANCED_MODE_SUPPORT
 
 };
 
@@ -235,7 +251,12 @@ uint32_t calculate_pixel_clock(edid_3d_data_p mhl_edid_3d_data,
 	MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
 			"vertical_sync_frequency_in_milliHz:%u vertical_sync_period_in_microseconds: %u\n",vertical_sync_frequency_in_milliHz,vertical_sync_period_in_microseconds);
 
-	if (0 == VIC) {
+#ifdef MHL2_ENHANCED_MODE_SUPPORT
+	if (0 == VIC || (VIC > MAX_VIC_SUPPORTED && VIC != VIC_4K_24 && VIC != VIC_4K_30)) {
+#else
+	if (0 == VIC || VIC > MAX_VIC_SUPPORTED) {
+#endif
+		/* MHL2_ENHANCED_MODE_SUPPORT */
 		/* rule of thumb: */
 		vertical_active_period_in_microseconds = (vertical_sync_period_in_microseconds * 8) / 10;
 
@@ -285,7 +306,12 @@ uint32_t calculate_pixel_clock(edid_3d_data_p mhl_edid_3d_data,
 	MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
 			"horizontal_sync_period_in_nanoseconds: %u\n",horizontal_sync_period_in_nanoseconds);
 
-	if (0 == VIC) {
+#ifdef MHL2_ENHANCED_MODE_SUPPORT
+	if (0 == VIC || (VIC > MAX_VIC_SUPPORTED && VIC != VIC_4K_24 && VIC != VIC_4K_30)) {
+#else
+	if (0 == VIC || VIC > MAX_VIC_SUPPORTED) {
+#endif
+		/* MHL2_ENHANCED_MODE_SUPPORT */
 		/* rule of thumb: */
 		horizontal_active_period_in_nanoseconds = (horizontal_sync_period_in_nanoseconds * 8) / 10;
 		MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
@@ -388,7 +414,6 @@ PMHL2_video_descriptor_t pMHL2_video_descriptor = p_MHL2_video_descriptor_parm;
 	return ret_val;
 }
 
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT
 void si_mhl_tx_prune_dtd_list(edid_3d_data_p mhl_edid_3d_data,
 							  P_18_byte_descriptor_u p_desc,uint8_t limit)
 {
@@ -425,7 +450,6 @@ void si_mhl_tx_prune_dtd_list(edid_3d_data_p mhl_edid_3d_data,
 		}
 	}
 }
-#endif
 
 
 /*
@@ -717,7 +741,6 @@ static uint8_t si_mhl_tx_parse_861_long_descriptors(edid_3d_data_p mhl_edid_3d_d
 }
 */
 
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT
 static void si_mhl_tx_prune_edid(edid_3d_data_p mhl_edid_3d_data)
 {
 	PEDID_block0_t p_EDID_block_0 = (PEDID_block0_t)&mhl_edid_3d_data->EDID_block_data[0];
@@ -1158,15 +1181,24 @@ static void si_mhl_tx_prune_edid(edid_3d_data_p mhl_edid_3d_data)
 #endif //)
 	{
 		SET_3D_FLAG(mhl_edid_3d_data,FLAGS_EDID_READ_DONE)
-		si_mhl_tx_drv_enable_video_path(mhl_edid_3d_data->drv_context);
+		//si_mhl_tx_drv_enable_video_path(mhl_edid_3d_data->drv_context);
 	}
 }
-#endif
 /*
 */
 static uint8_t IsQualifiedMhlVIC(edid_3d_data_p mhl_edid_3d_data,uint8_t VIC,PMHL2_video_descriptor_t p_mhl2_video_descriptor)
 {
 	uint8_t ret_val=0;
+#ifdef MHL2_ENHANCED_MODE_SUPPORT
+	if ((VIC == 0) || ((VIC > MAX_VIC_SUPPORTED) && (VIC != VIC_4K_24) && (VIC != VIC_4K_30))) {
+		/* MHL2_ENHANCED_MODE_SUPPORT */
+		return ret_val;
+	}
+#else
+	if (0 == VIC || VIC > MAX_VIC_SUPPORTED) {
+		return ret_val;
+	}
+#endif
 	if (VIC > 0) {
 		ret_val= is_MHL_timing_mode(mhl_edid_3d_data,VIC_info[VIC].columns, VIC_info[VIC].rows, VIC_info[VIC].field_rate_in_milliHz,p_mhl2_video_descriptor,VIC);
 		if (vif_dual_frame_rate == VIC_info[VIC].fields.frame_rate_info) {
@@ -1455,12 +1487,7 @@ static void si_mhl_tx_display_timing_enumeration_end(edid_3d_data_p mhl_edid_3d_
 	/* notify the app (board specific) layer */
 	display_timing_enumeration_end(mhl_edid_3d_data);
 	SET_3D_FLAG(mhl_edid_3d_data,FLAGS_BURST_3D_DONE);
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT
 	si_mhl_tx_prune_edid(mhl_edid_3d_data);
-#else
-	SET_3D_FLAG(mhl_edid_3d_data,FLAGS_EDID_READ_DONE)
-	si_mhl_tx_drv_enable_video_path(mhl_edid_3d_data->drv_context);	// //TODO: FD, TBI, debug?
-#endif
 }
 
 
@@ -2044,7 +2071,6 @@ void SiiMhlTxMakeItDVI(edid_3d_data_p mhl_edid_3d_data,PEDID_block0_t p_EDID_blo
 			,"EDID: second block now all 0xFF\n");
 }
 
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT
 static void SiiMhlTx3dReqForNonTranscodeMode( edid_3d_data_p mhl_edid_3d_data )
 {
 	MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
@@ -2090,11 +2116,10 @@ static void SiiMhlTx3dReqForNonTranscodeMode( edid_3d_data_p mhl_edid_3d_data )
 			si_mhl_tx_drv_set_hw_tpi_mode( mhl_edid_3d_data->drv_context, true );
 
 			SET_3D_FLAG(mhl_edid_3d_data, FLAGS_EDID_READ_DONE);
-			si_mhl_tx_drv_enable_video_path(mhl_edid_3d_data->drv_context);
+			//si_mhl_tx_drv_enable_video_path(mhl_edid_3d_data->drv_context);
 		}
 	}
 }
-#endif
 
 
 uint8_t CA=0;//Channel/Speaker Allocation.
@@ -2104,6 +2129,7 @@ uint8_t  Samplebit;
 uint8_t  Cap_MAX_channel;
 uint8_t  Cap_Samplebit;
 uint16_t Cap_SampleRate;
+extern void update_av_info_edid(bool audio_video, unsigned int param1, unsigned int param2);
 static uint8_t parse_861_short_descriptors (
 				  edid_3d_data_p mhl_edid_3d_data
 			  	, uint8_t *p_EDID_block_data)
@@ -2441,10 +2467,10 @@ static uint8_t parse_861_short_descriptors (
                     {
                     P_vsdb_t p_vsdb = (P_vsdb_t) p_data_u.puc_data_block;
                     uint8_t *puc_next_db = ((uint8_t *)&p_vsdb->header) + sizeof(p_vsdb->header) + data_block_length;
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT                    
+                    uint8_t MHL_4k_VIC[5] ={ 0}; 
+                    uint8_t i=0;
                     extern bool MHL_3D_Support;
                     MHL_3D_Support = false;
-#endif                       
 		    // TODO: FD, TBI, any chance of MHL OUI here? 0x030C00 is HDMI OUI
 		    if (   (p_vsdb->IEEE_OUI[0] == 0x03)
 				    && (p_vsdb->IEEE_OUI[1] == 0x0C)
@@ -2454,6 +2480,7 @@ static uint8_t parse_861_short_descriptors (
 			    mhl_edid_3d_data->parse_data.p_HDMI_vsdb = p_vsdb;
 			    SII_ASSERT (5 <= data_block_length,("unexpected data_block_length\n"));
 			    mhl_edid_3d_data->parse_data.HDMI_sink = true;
+				mhl_edid_3d_data->parse_data.HDMI_vsdb_found = true;
 			    *((PHDMI_LLC_BA_t)&mhl_edid_3d_data->parse_data.CEC_A_B) = p_HDMI_vendor_specific_payload->B_A;   /* CEC Physical address */
 			    *((PHDMI_LLC_DC_t)&mhl_edid_3d_data->parse_data.CEC_C_D) = p_HDMI_vendor_specific_payload->D_C;
 			    /* Offset of 3D_Present bit in VSDB */
@@ -2474,23 +2501,33 @@ static uint8_t parse_861_short_descriptors (
 				    mhl_edid_3d_data->parse_data._3D_supported = false;
 			    } else if (mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->byte13._3D_present) {
 				    mhl_edid_3d_data->parse_data._3D_supported = true;
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT				    
 				    MHL_3D_Support= true;
-#endif				    
 			    } else {
 				    mhl_edid_3d_data->parse_data._3D_supported = false;
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT				    
 				    MHL_3D_Support= false;
-#endif				    
+			    }
+
+				 if  (mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->byte14.HDMI_VIC_len) {
+				 	for(i = 0; i < mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->byte14.HDMI_VIC_len && i < 5; i++){
+				   		MHL_4k_VIC[i]= mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->vicList[i];
+				   		if(MHL_4k_VIC[i] == 1)
+				   			update_av_info_edid(true, HDMI_4k30_DSC, 0);
+				   		else if( (MHL_4k_VIC[i] == 3) || (MHL_4k_VIC[i] == 4))	
+				   			update_av_info_edid(true, HDMI_4k24_DSC, 0);
+						pr_info("MHL_4k_VIC[%d]=%d\n", i, MHL_4k_VIC[i]);
+					}
 			    }
 
 			    MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
 					    "EDID indicates %s3D support\n",
 					    mhl_edid_3d_data->parse_data._3D_supported?"":"NO " );
 		    } else {
-			    MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,"check VS IEEE code failed!\n");
-			    MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,"00:%02X, 01:%02X, 02:%02X\n", p_vsdb->IEEE_OUI[0], p_vsdb->IEEE_OUI[1],p_vsdb->IEEE_OUI[2]);
-			    mhl_edid_3d_data->parse_data.HDMI_sink = false;
+			if (false == mhl_edid_3d_data->parse_data.HDMI_vsdb_found) {
+					MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context, "check VS IEEE code failed!\n");
+					MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context, "00:%02X, 01:%02X, 02:%02X\n",
+					p_vsdb->IEEE_OUI[0], p_vsdb->IEEE_OUI[1], p_vsdb->IEEE_OUI[2]);
+					mhl_edid_3d_data->parse_data.HDMI_sink = false;
+			}
 		    }
 
 		    MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
@@ -2572,6 +2609,8 @@ void si_mhl_tx_handle_atomic_hw_edid_read_complete(edid_3d_data_p mhl_edid_3d_da
 #endif //)
 	/* Parse EDID Block #0 Desctiptors */
 	//si_mhl_tx_parse_block_zero_timing_descriptors(mhl_edid_3d_data,p_EDID_block_0);
+	/* In case for multi-vsdb EDID that last vsdb is non-HDMI */
+	mhl_edid_3d_data->parse_data.HDMI_vsdb_found = false;
 
 	MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context
 			,"EDID -> Number of 861 Extensions = %d\n"
@@ -2609,10 +2648,8 @@ void si_mhl_tx_handle_atomic_hw_edid_read_complete(edid_3d_data_p mhl_edid_3d_da
 	 */
 	p_EDID_block_0->checksum = 0;
 	p_EDID_block_0->checksum = calculate_generic_checksum((uint8_t *)p_EDID_block_0,0,sizeof(*p_EDID_block_0));
-
-#ifdef CONFIG_MTK_HDMI_3D_SUPPORT
+	if(0)
 	SiiMhlTx3dReqForNonTranscodeMode(mhl_edid_3d_data);
-#endif	
 }
 
 /*
@@ -2713,6 +2750,23 @@ int si_edid_find_pixel_clock_from_HDMI_VIC(void *context, uint8_t vic)
 }
 int si_edid_find_pixel_clock_from_AVI_VIC(void *context, uint8_t vic)
 {
+#if 0
+/* #ifdef MHL2_ENHANCED_MODE_SUPPORT */
+		// Use the slot of 65 for VIC number 93
+		if (93 == vic)
+		{
+			vic = 65;
+		}
+		if (94 == vic)
+		{
+			vic = 66;
+		}
+		if (95 == vic)
+		{
+			vic = 67;
+		}
+#endif // MHL2_ENHANCED_MODE_SUPPORT
+
 	return calculate_pixel_clock(context
 			, (uint16_t)VIC_info[vic].columns
 			, (uint16_t)VIC_info[vic].rows

@@ -45,6 +45,9 @@
 #include <linux/math64.h>
 #include <mtd/ubi-user.h>
 #include "ubi.h"
+#ifdef CONFIG_MTK_FTL
+#include "../mt_ftl.h"
+#endif
 
 /**
  * get_exclusive - get exclusive access to an UBI volume.
@@ -311,8 +314,13 @@ static ssize_t vol_cdev_direct_write(struct file *file, const char __user *buf,
 			err = -EFAULT;
 			break;
 		}
-
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+		if (lnum >= 10)
+			err = ubi_eba_write_tlc_leb(ubi, vol, lnum, tbuf, off, len);
+		else
+#endif
 		err = ubi_eba_write_leb(ubi, vol, lnum, tbuf, off, len);
+
 		if (err)
 			break;
 
@@ -397,7 +405,7 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
 	case UBI_IOCVOLUP:
 	{
 		int64_t bytes, rsvd_bytes;
-#ifdef CONFIG_BLB
+#ifdef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 		struct ubi_volume *backup_vol = ubi->volumes[vol_id2idx(ubi, UBI_BACKUP_VOLUME_ID)];
 #endif
 		if (!capable(CAP_SYS_RESOURCE)) {
@@ -432,7 +440,7 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
 			ubi_volume_notify(ubi, vol, UBI_VOLUME_UPDATED);
 			revoke_exclusive(desc, UBI_READWRITE);
 		}
-#ifdef CONFIG_BLB
+#ifdef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 		ubi_eba_unmap_leb(ubi, backup_vol, 0);
 		ubi_eba_unmap_leb(ubi, backup_vol, 1);
 #endif
@@ -585,10 +593,14 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
 	/* Create a R/O block device on top of the UBI volume */
 	case UBI_IOCVOLCRBLK:
 	{
+#ifdef CONFIG_MTK_FTL
+		err = mt_ftl_blk_create(desc);
+#else
 		struct ubi_volume_info vi;
 
 		ubi_get_volume_info(desc, &vi);
 		err = ubiblock_create(&vi);
+#endif
 		break;
 	}
 
@@ -598,7 +610,11 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
 		struct ubi_volume_info vi;
 
 		ubi_get_volume_info(desc, &vi);
+#ifdef CONFIG_MTK_FTL
+		err = mt_ftl_blk_remove(&vi);
+#else
 		err = ubiblock_remove(&vi);
+#endif
 		break;
 	}
 	case UBI_IOCLBMAP:

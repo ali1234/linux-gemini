@@ -161,12 +161,15 @@ int sch_direct_xmit(struct sk_buff *skb, struct Qdisc *q,
 	if (validate)
 		skb = validate_xmit_skb_list(skb, dev);
 
-	if (skb) {
+	if (likely(skb)) {
 		HARD_TX_LOCK(dev, txq, smp_processor_id());
 		if (!netif_xmit_frozen_or_stopped(txq))
 			skb = dev_hard_start_xmit(skb, dev, txq, &ret);
 
 		HARD_TX_UNLOCK(dev, txq);
+	} else {
+		spin_lock(root_lock);
+		return qdisc_qlen(q);
 	}
 
 	#ifdef CONFIG_MTK_NET_LOGGING
@@ -501,28 +504,6 @@ static int pfifo_fast_enqueue(struct sk_buff *skb, struct Qdisc *qdisc)
 		struct pfifo_fast_priv *priv;
 		struct sk_buff_head *list;
 
-		/*mtk_net_change*/
-		if (skb->protocol == htons(ETH_P_IP)) {
-			if (skb->len <= 52 && (ip_hdr(skb)->protocol) == IPPROTO_TCP)
-				band = 0;
-		}
-		if (skb->protocol == htons(ETH_P_IPV6)) {
-			if (skb->len <= 128) {
-				struct tcphdr *tcph;
-				__be16 frag_off;
-				struct ipv6hdr *iph = ipv6_hdr(skb);
-				u8 nexthdr = iph->nexthdr;
-				u32 total_len = sizeof(struct ipv6hdr) + ntohs(iph->payload_len);
-				u32 l4_off = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &nexthdr, &frag_off);
-
-				tcph = (struct tcphdr *)(skb_network_header(skb) + l4_off);
-				if (nexthdr == IPPROTO_TCP && !tcph->syn && !tcph->fin && !tcph->rst &&
-				    ((total_len - l4_off) == (tcph->doff << 2))) {
-					band = 0;
-				}
-			}
-		}
-
 		priv = qdisc_priv(qdisc);
 		list = band2list(priv, band);
 
@@ -708,8 +689,10 @@ static void qdisc_rcu_free(struct rcu_head *head)
 {
 	struct Qdisc *qdisc = container_of(head, struct Qdisc, rcu_head);
 
-	if (qdisc_is_percpu_stats(qdisc))
+	if (qdisc_is_percpu_stats(qdisc)) {
 		free_percpu(qdisc->cpu_bstats);
+		free_percpu(qdisc->cpu_qstats);
+	}
 
 	kfree((char *) qdisc - qdisc->padded);
 }

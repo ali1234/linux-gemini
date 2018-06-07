@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _MT_SCHED_MON_H
 #define _MT_SCHED_MON_H
 /*CPU holding event: ISR/SoftIRQ/Tasklet/Timer*/
@@ -71,20 +84,24 @@ static inline void mt_trace_rqlock_end(raw_spinlock_t *lock) {};
 extern spinlock_t mt_irq_count_lock;
 extern void mt_show_last_irq_counts(void);
 extern void mt_show_current_irq_counts(void);
+extern void mt_sched_monitor_switch(int on);
+
 
 /*Schedule disable event: IRQ/Preempt disable monitor*/
 struct sched_stop_event {
 	unsigned long long cur_ts;
 	unsigned long long last_ts;
 	unsigned long long last_te;
+	unsigned long long lock_dur;
+	unsigned long lock_owner;
+	raw_spinlock_t *lock;
 };
 
 struct sched_lock_event {
 	unsigned long long lock_ts;
 	unsigned long long lock_te;
 	unsigned long long lock_dur;
-	unsigned long curr_owner;
-	unsigned long last_owner;
+	unsigned long lock_owner;
 };
 
 DECLARE_PER_CPU(struct sched_stop_event, IRQ_disable_mon);
@@ -98,16 +115,16 @@ extern void MT_trace_irq_off(void);
 extern void MT_trace_preempt_on(void);
 extern void MT_trace_preempt_off(void);
 extern void MT_trace_check_preempt_dur(void);
-extern void MT_trace_raw_spin_lock_s(void *owner);
-extern void MT_trace_raw_spin_lock_e(void *owner);
+extern void MT_trace_raw_spin_lock_s(raw_spinlock_t *lock);
+extern void MT_trace_raw_spin_lock_e(raw_spinlock_t *lock);
 #else
 static inline void MT_trace_irq_on(void) {};
 static inline void MT_trace_irq_off(void) {};
 static inline void MT_trace_preempt_on(void) {};
 static inline void MT_trace_preempt_off(void) {};
 static inline void MT_trace_check_preempt_dur(void) {};
-static inline void MT_trace_raw_spin_lock_s(void *owner) {};
-static inline void MT_trace_raw_spin_lock_e(void *owner) {};
+static inline void MT_trace_raw_spin_lock_s(raw_spinlock_t *lock) {};
+static inline void MT_trace_raw_spin_lock_e(raw_spinlock_t *lock) {};
 #endif
 
 /* [IRQ-disable] White List
@@ -129,20 +146,27 @@ DECLARE_PER_CPU(unsigned long long, local_timer_te);
 #define MON_RESET 2
 
 #ifdef CONFIG_MT_RT_THROTTLE_MON
-extern void save_mt_rt_mon_info(struct task_struct *p, unsigned long long ts);
-extern void end_mt_rt_mon_info(struct task_struct *p);
-extern void check_mt_rt_mon_info(struct task_struct *p);
-extern void mt_rt_mon_switch(int on);
-extern void mt_rt_mon_print_task(void);
-extern int mt_rt_mon_enable(void);
+DECLARE_PER_CPU(struct mt_rt_mon_struct, mt_rt_mon_head);
+DECLARE_PER_CPU(int, rt_mon_count);
+DECLARE_PER_CPU(int, mt_rt_mon_enabled);
+DECLARE_PER_CPU(unsigned long long, rt_start_ts);
+DECLARE_PER_CPU(unsigned long long, rt_end_ts);
+DECLARE_PER_CPU(unsigned long long, rt_dur_ts);
+
+extern void save_mt_rt_mon_info(int cpu, u64 delta_exec, struct task_struct *p);
+extern void mt_rt_mon_switch(int on, int cpu);
+extern void mt_rt_mon_print_task(int cpu);
+extern void mt_rt_mon_print_task_from_buffer(void);
+extern void update_mt_rt_mon_start(int cpu, u64 delta_exec);
+extern int mt_rt_mon_enable(int cpu);
 #else
 static inline void
-save_mt_rt_mon_info(struct task_struct *p, unsigned long long ts) {};
-static inline void end_mt_rt_mon_info(struct task_struct *p) {};
-static inline void check_mt_rt_mon_info(struct task_struct *p) {};
-static inline void mt_rt_mon_switch(int on) {};
-static inline void mt_rt_mon_print_task(void) {};
-static inline int mt_rt_mon_enable(void)
+save_mt_rt_mon_info(int cpu, u64 delta_exec, struct task_struct *p) {};
+static inline void mt_rt_mon_switch(int on, int cpu) {};
+static inline void mt_rt_mon_print_task(int cpu) {};
+static inline void mt_rt_mon_print_task_from_buffer(void) {};
+static inline void update_mt_rt_mon_start(int cpu, u64 delta_exec) {};
+static inline int mt_rt_mon_enable(int cpu)
 {
 	return 0;
 }

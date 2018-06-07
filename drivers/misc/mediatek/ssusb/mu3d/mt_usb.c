@@ -1,11 +1,14 @@
 /*
- * MUSB OTG controller driver for Blackfin Processors
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Copyright 2006-2008 Analog Devices Inc.
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- * Enter bugs at http://blackfin.uclinux.org/
- *
- * Licensed under the GPL-2 or later.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -108,14 +111,14 @@ void connection_work(struct work_struct *data)
 
 bool mt_usb_is_ready(void)
 {
-	mu3d_dbg(K_INFO, "USB is ready or not\n");
-#ifdef NEVER
-	if (!mtk_musb || !mtk_musb->is_ready)
+	if (!_mu3d_musb)
 		return false;
-	else
+
+	if (_mu3d_musb->usb_mode == CABLE_MODE_CHRG_ONLY ||
+		_mu3d_musb->usb_mode == CABLE_MODE_HOST_ONLY)
 		return true;
-#endif				/* NEVER */
-	return true;
+
+	return _mu3d_musb->softconnect ? true : false;
 }
 
 void mt_usb_connect(void)

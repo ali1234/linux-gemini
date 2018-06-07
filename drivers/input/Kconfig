@@ -209,6 +209,9 @@ source "drivers/input/touchscreen/mediatek/Kconfig"
 
 source "drivers/input/keyboard/mediatek/Kconfig"
 
+source "drivers/input/hall/Kconfig"
+source "drivers/input/switch/Kconfig"
+
 source "drivers/input/misc/Kconfig"
 source "drivers/input/fingerprint/Kconfig"
 

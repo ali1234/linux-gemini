@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _LCM_DEFINE_H
 #define _LCM_DEFINE_H
 
@@ -21,6 +34,7 @@
 #define LCM_GPIO_MODE_05	5
 #define LCM_GPIO_MODE_06	6
 #define LCM_GPIO_MODE_07	7
+#define MAX_LCM_GPIO_MODE	8
 
 /* LCM_GPIO_DIR_DATA */
 #define LCM_GPIO_DIR_IN	0
@@ -41,9 +55,16 @@
 #define LCM_UTIL_WRITE_CMD_V2	5
 #define LCM_UTIL_READ_CMD_V1	6
 #define LCM_UTIL_READ_CMD_V2	7
+#define LCM_UTIL_WRITE_CMD_V21	8
+#define LCM_UTIL_WRITE_CMD_V22	9
+#define LCM_UTIL_WRITE_CMD_V23	10
+#define LCM_UTIL_RAR	11
 
 /* LCM_UTIL_RESET_DATA */
 #define LCM_UTIL_RESET_LOW	0
 #define LCM_UTIL_RESET_HIGH	1
+
+/* LCM_UTIL_WRITE_CMD_V2_DATA */
+#define LCM_UTIL_WRITE_CMD_V2_NULL	0xF9
 
 #endif				/* _LCM_DEFINE_H */

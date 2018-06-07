@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /******************************************************************************
  *  INCLUDE LIBRARY
  ******************************************************************************/
@@ -20,7 +33,6 @@
 #include "sec_nvram.h"
 
 #define MOD                         "ASF"
-#define HEVC_BLK_LEN                20480
 
 #define CI_BLK_SIZE                 16
 #define CI_BLK_ALIGN(len) (((len)+CI_BLK_SIZE-1) & ~(CI_BLK_SIZE-1))
@@ -28,12 +40,6 @@
 /**************************************************************************
  *  GLOBAL VARIABLES
  **************************************************************************/
-typedef struct {
-	unsigned char buf[HEVC_BLK_LEN];
-	unsigned int len;
-} HEVC_BLK;
-HEVC_BLK hevc_blk;
-
 uint lks = 2;		/* if sec is not enabled, this param will not be updated */
 module_param(lks, uint, S_IRUSR /*|S_IWUSR|S_IWGRP */  | S_IRGRP | S_IROTH);	/* r--r--r-- */
 MODULE_PARM_DESC(lks, "A device lks parameter under sysfs (0=NL, 1=L, 2=NA)");
@@ -56,7 +62,6 @@ long sec_core_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int err = 0;
 	int ret = 0;
-	unsigned int cipher_len = 0;
 	unsigned int rid[4];
 	META_CONTEXT meta_ctx;
 
@@ -124,8 +129,8 @@ long sec_core_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 
 		/* TODO : double check if META register is correct ? */
-		masp_hal_sp_hacc_enc((unsigned char *)&(meta_ctx.data), NVRAM_CIPHER_LEN, TRUE,
-				     HACC_USER2, FALSE);
+		masp_hal_sp_hacc_enc((unsigned char *)&(meta_ctx.data), NVRAM_CIPHER_LEN, true,
+				     HACC_USER2, false);
 		meta_ctx.ret = SEC_OK;
 
 		ret = osal_copy_to_user((void __user *)arg, (void *)&meta_ctx, sizeof(meta_ctx));
@@ -139,57 +144,10 @@ long sec_core_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (osal_copy_from_user((void *)&meta_ctx, (void __user *)arg, sizeof(meta_ctx)))
 			return -EFAULT;
 
-		masp_hal_sp_hacc_dec((unsigned char *)&(meta_ctx.data), NVRAM_CIPHER_LEN, TRUE,
-				     HACC_USER2, FALSE);
+		masp_hal_sp_hacc_dec((unsigned char *)&(meta_ctx.data), NVRAM_CIPHER_LEN, true,
+				     HACC_USER2, false);
 		meta_ctx.ret = SEC_OK;
 		ret = osal_copy_to_user((void __user *)arg, (void *)&meta_ctx, sizeof(meta_ctx));
-		break;
-
-		/* ---------------------------------- */
-		/* HEVC EOP                           */
-		/* ---------------------------------- */
-	case SEC_HEVC_EOP:
-		pr_debug("[%s] CMD - SEC_HEVC_EOP\n", MOD);
-		if (osal_copy_from_user((void *)(&hevc_blk), (void __user *)arg, sizeof(HEVC_BLK)))
-			return -EFAULT;
-
-		if ((hevc_blk.len % CI_BLK_SIZE) == 0) {
-			cipher_len = hevc_blk.len;
-		} else if ((hevc_blk.len % CI_BLK_SIZE) > 0) {
-			cipher_len = CI_BLK_ALIGN(hevc_blk.len) - CI_BLK_SIZE;
-			if (cipher_len == 0) {
-				pr_debug("[%s] less than one ci_blk, no need to do eop", MOD);
-				break;
-			}
-		}
-		masp_hal_sp_hacc_enc((unsigned char *)(&hevc_blk.buf), cipher_len, TRUE, HACC_USER4,
-				     FALSE);
-
-		ret = osal_copy_to_user((void __user *)arg, (void *)(&hevc_blk), sizeof(HEVC_BLK));
-		break;
-
-		/* ---------------------------------- */
-		/* HEVC DOP                           */
-		/* ---------------------------------- */
-	case SEC_HEVC_DOP:
-		pr_debug("[%s] CMD - SEC_HEVC_DOP\n", MOD);
-		if (osal_copy_from_user((void *)(&hevc_blk), (void __user *)arg, sizeof(HEVC_BLK)))
-			return -EFAULT;
-
-		if ((hevc_blk.len % CI_BLK_SIZE) == 0)
-			cipher_len = hevc_blk.len;
-		else if ((hevc_blk.len % CI_BLK_SIZE) > 0) {
-			cipher_len = CI_BLK_ALIGN(hevc_blk.len) - CI_BLK_SIZE;
-			if (cipher_len == 0) {
-				pr_debug("[%s] less than one ci_blk, no need to do dop", MOD);
-				break;
-			}
-		}
-
-		masp_hal_sp_hacc_dec((unsigned char *)(&hevc_blk.buf), cipher_len, TRUE, HACC_USER4,
-				     FALSE);
-
-		ret = osal_copy_to_user((void __user *)arg, (void *)(&hevc_blk), sizeof(HEVC_BLK));
 		break;
 
 		/* ---------------------------------- */

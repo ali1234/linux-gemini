@@ -435,8 +435,6 @@ struct rt_rq {
 	int rt_queued;
 
 	int rt_throttled;
-	/* sched:  prevent normal task could run anymore */
-	int rt_disable_borrow;
 	u64 rt_time;
 	u64 rt_runtime;
 	/* Nests inside the rq lock: */
@@ -1027,9 +1025,10 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 	 * After ->on_cpu is cleared, the task can be moved to a different CPU.
 	 * We must ensure this doesn't happen until the switch is completely
 	 * finished.
+	 *
+	 * Pairs with the control dependency and rmb in try_to_wake_up().
 	 */
-	smp_wmb();
-	prev->on_cpu = 0;
+	smp_store_release(&prev->on_cpu, 0);
 #endif
 #ifdef CONFIG_DEBUG_SPINLOCK
 	/* this is a valid case when another task releases the spinlock */
@@ -1640,4 +1639,4 @@ extern void lock_timekeeper(void);
 #ifdef CONFIG_SCHED_DEBUG
 extern void print_rt_rq(struct seq_file *m, int cpu, struct rt_rq *rt_rq);
 #endif /* CONFIG_SCHED_DEBUG */
-
+extern void unthrottle_offline_rt_rqs(struct rq *rq);

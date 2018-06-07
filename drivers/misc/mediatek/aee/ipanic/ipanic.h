@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #if !defined(__AEE_IPANIC_H__)
 #define __AEE_IPANIC_H__
 
@@ -89,7 +102,6 @@ void ipanic_oops_free(struct aee_oops *oops, int erase);
 void ipanic_block_scramble(u8 *buf, int buflen);
 /* for WDT timeout case : dump timer/schedule/irq/softirq etc... debug information */
 extern void aee_wdt_dump_info(void);
-extern int mt_dump_wq_debugger(void);
 void aee_disable_api(void);
 int panic_dump_android_log(char *buf, size_t size, int type);
 
@@ -128,6 +140,7 @@ enum IPANIC_DT {
 	IPANIC_DT_RADIO_LOG,
 	IPANIC_DT_LAST_LOG,
 	IPANIC_DT_ATF_LOG,
+	IPANIC_DT_DISP_LOG,
 	IPANIC_DT_RAM_DUMP = 28,
 	IPANIC_DT_SHUTDOWN_LOG = 30,
 	IPANIC_DT_RESERVED31 = 31,
@@ -203,6 +216,7 @@ struct ipanic_atf_log_rec {
 #define LAST_LOG_LEN	(AEE_LOG_LEVEL == 8 ? __LOG_BUF_LEN : 32*1024)
 
 #define ATF_LOG_SIZE	(32*1024)
+#define DISP_LOG_SIZE	(30*16*1024)
 
 char *expdb_read_size(int off, int len);
 char *ipanic_read_size(int off, int len);
@@ -215,6 +229,7 @@ void ipanic_log_temp_init(void);
 void ipanic_klog_region(struct kmsg_dumper *dumper);
 int ipanic_klog_buffer(void *data, unsigned char *buffer, size_t sz_buf);
 extern int ipanic_atflog_buffer(void *data, unsigned char *buffer, size_t sz_buf);
+extern int panic_dump_disp_log(void *data, unsigned char *buffer, size_t sz_buf);
 
 int ipanic_mem_write(void *buf, int off, int len, int encrypt);
 void *ipanic_data_from_sd(struct ipanic_data_header *dheader, int encrypt);
@@ -228,7 +243,7 @@ extern unsigned int reset_boot_up_device(int type);	/* force to re-initialize th
 /*#ifdef CONFIG_MTK_MMPROFILE_SUPPORT*/
 #ifdef CONFIG_MMPROFILE
 extern unsigned int MMProfileGetDumpSize(void);
-extern void MMProfileGetDumpBuffer(unsigned int Start, unsigned int *pAddr, unsigned int *pSize);
+extern void MMProfileGetDumpBuffer(unsigned int Start, unsigned long *pAddr, unsigned int *pSize);
 #endif
 extern void mrdump_mini_per_cpu_regs(int cpu, struct pt_regs *regs);
 extern void mrdump_mini_ke_cpu_regs(struct pt_regs *regs);
@@ -238,4 +253,13 @@ extern void mrdump_mini_ipanic_done(void);
 extern int mrdump_task_info(unsigned char *buffer, size_t sz_buf);
 extern void aee_rr_rec_exp_type(unsigned int type);
 extern unsigned int aee_rr_curr_exp_type(void);
+extern void aee_rr_rec_scp(void);
+#ifdef CONFIG_SCHED_DEBUG
+extern int sysrq_sched_debug_show_at_AEE(void);
+#endif
+#ifdef CONFIG_MTK_WQ_DEBUG
+extern void wq_debug_dump(void);
+#endif
+extern void __disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2(void);
+
 #endif

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef VDEC_DRV_IF_DEP_H /* for 6572 only */
 #define VDEC_DRV_IF_DEP_H
 
@@ -127,6 +140,7 @@ typedef struct __VDEC_HANDLE_T {
 	VCODEC_DEC_PRIVATE_OUTPUT_EXTRA_T prExtraDecOutput;
 #ifdef DumpInput__
 	FILE *pf_out;
+	VAL_MEM_ADDR_T          rDumpBase;
 #endif
 
 	/* Morris Yang 20111101 [ */

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -16,7 +29,6 @@
 #include <asm/string.h>
 #include <linux/spinlock.h>
 #include "mt-plat/mtk_thermal_monitor.h"
-#include "mtk_thermal_typedefs.h"
 #include "mach/mt_thermal.h"
 #include "mt-plat/mtk_mdm_monitor.h"
 #include <linux/uidgid.h>
@@ -449,7 +461,7 @@ static ssize_t mtktspa_write(struct file *file, const char __user *buffer, size_
 
 	if (sscanf
 	    (ptr_mtktspa_data->desc,
-	     "%d %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d",
+	     "%d %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d",
 	     &num_trip, &ptr_mtktspa_data->trip[0], &ptr_mtktspa_data->t_type[0], ptr_mtktspa_data->bind0,
 	     &ptr_mtktspa_data->trip[1], &ptr_mtktspa_data->t_type[1], ptr_mtktspa_data->bind1,
 	     &ptr_mtktspa_data->trip[2], &ptr_mtktspa_data->t_type[2], ptr_mtktspa_data->bind2,
@@ -463,6 +475,14 @@ static ssize_t mtktspa_write(struct file *file, const char __user *buffer, size_
 	     &ptr_mtktspa_data->time_msec) == 32) {
 		mtktspa_dprintk("[mtktspa_write] mtktspa_unregister_thermal\n");
 		mtktspa_unregister_thermal();
+
+		if (num_trip < 0 || num_trip > 10) {
+			aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "mtktspa_write",
+					"Bad argument");
+			mtktspa_dprintk("[mtktspa_write] bad argument\n");
+			kfree(ptr_mtktspa_data);
+			return -EINVAL;
+		}
 
 		for (i = 0; i < num_trip; i++)
 			g_THERMAL_TRIP[i] = ptr_mtktspa_data->t_type[i];
@@ -514,6 +534,8 @@ static ssize_t mtktspa_write(struct file *file, const char __user *buffer, size_
 		return count;
 	}
 
+	aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "mtktspa_write",
+			"Bad argument");
 	mtktspa_dprintk("[mtktspa_write] bad argument\n");
 	kfree(ptr_mtktspa_data);
 	return -EINVAL;
@@ -641,7 +663,7 @@ static int __init mtktspa_init(void)
 	if (!mobile_thro_proc_dir)
 		mtktspa_dprintk("[mobile_tm_proc_register]: mkdir /proc/mobile_tm failed\n");
 	else
-		entry = proc_create("tx_thro", S_IRUGO | S_IWUSR, mobile_thro_proc_dir, &_tx_thro_fops);
+		proc_create("tx_thro", S_IRUGO | S_IWUSR, mobile_thro_proc_dir, &_tx_thro_fops);
 #endif
 
 	mtktspa_dir = mtk_thermal_get_proc_drv_therm_dir_entry();

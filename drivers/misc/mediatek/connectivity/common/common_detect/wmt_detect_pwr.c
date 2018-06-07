@@ -27,57 +27,23 @@
 /*copied form WMT module*/
 static int wmt_detect_dump_pin_conf(void)
 {
-	WMT_DETECT_INFO_FUNC("[WMT-DETECT]=>dump wmt pin configuration start<=\n");
+	WMT_DETECT_DBG_FUNC("[WMT-DETECT]=>dump wmt pin configuration start<=\n");
 
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_LDO_EN_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("LDO(GPIO%d)\n",
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_LDO_EN_PIN].gpio_num);
-	} else
-		WMT_DETECT_INFO_FUNC("LDO(not defined)\n");
+	WMT_DETECT_INFO_FUNC("LDO(GPIO%d), PMU(GPIO%d), PMUV28(GPIO%d)\n",
+			gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_LDO_EN_PIN].gpio_num,
+			gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_num,
+			gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMUV28_EN_PIN].gpio_num);
 
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("PMU(GPIO%d)\n",
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_num);
-	} else
-		WMT_DETECT_INFO_FUNC("PMU(not defined)\n");
+	WMT_DETECT_INFO_FUNC("RST(GPIO%d), BGF_EINT(GPIO%d), BGF_EINT_NUM(%d)\n",
+			gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num,
+			gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_BGF_EINT_PIN].gpio_num,
+			gpio_to_irq(gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_BGF_EINT_PIN].gpio_num));
 
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMUV28_EN_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("PMUV28(GPIO%d)\n",
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMUV28_EN_PIN].gpio_num);
-	} else
-		WMT_DETECT_INFO_FUNC("PMUV28(not defined)\n");
+	WMT_DETECT_INFO_FUNC("WIFI_EINT(GPIO%d), WIFI_EINT_NUM(%d)\n",
+			gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num,
+			gpio_to_irq(gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num));
 
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("RST(GPIO%d)\n",
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num);
-	} else
-		WMT_DETECT_INFO_FUNC("RST(not defined)\n");
-
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_BGF_EINT_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("BGF_EINT(GPIO%d)\n",
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_BGF_EINT_PIN].gpio_num);
-	} else
-		WMT_DETECT_INFO_FUNC("BGF_EINT(not defined)\n");
-
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_BGF_EINT_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("BGF_EINT_NUM(%d)\n",
-				gpio_to_irq(gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_BGF_EINT_PIN].gpio_num));
-	} else
-		WMT_DETECT_INFO_FUNC("BGF_EINT_NUM(not defined)\n");
-
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("WIFI_EINT(GPIO%d)\n",
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num);
-	} else
-		WMT_DETECT_INFO_FUNC("WIFI_EINT(not defined)\n");
-
-	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num) {
-		WMT_DETECT_INFO_FUNC("WIFI_EINT_NUM(%d)\n",
-				gpio_to_irq(gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num));
-	} else
-		WMT_DETECT_INFO_FUNC("WIFI_EINT_NUM(not defined)\n");
-
-	WMT_DETECT_INFO_FUNC("[WMT-PLAT]=>dump wmt pin configuration emds<=\n");
+	WMT_DETECT_DBG_FUNC("[WMT-PLAT]=>dump wmt pin configuration ends<=\n");
 
 	return 0;
 }
@@ -143,7 +109,19 @@ static int wmt_detect_chip_pwr_on(void)
 	/*set LDO/PMU/RST to output 0, no pull*/
 	if (INVALID_PIN_ID != gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_LDO_EN_PIN].gpio_num)
 		_wmt_detect_output_low(GPIO_COMBO_LDO_EN_PIN);
+	if (gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_state[GPIO_PULL_DIS]) {
+		pinctrl_select_state(gpio_ctrl_info.pinctrl_info,
+				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_state[GPIO_PULL_DIS]);
+		WMT_DETECT_INFO_FUNC("wmt_gpio:set GPIO_COMBO_PMU_EN_PIN to GPIO_PULL_DIS done!\n");
+	} else
+		WMT_DETECT_ERR_FUNC("wmt_gpio:set GPIO_COMBO_PMU_EN_PIN to GPIO_PULL_DIS fail, is NULL!\n");
 	_wmt_detect_output_low(GPIO_COMBO_PMU_EN_PIN);
+	if (gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_state[GPIO_PULL_DIS]) {
+		pinctrl_select_state(gpio_ctrl_info.pinctrl_info,
+				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_state[GPIO_PULL_DIS]);
+		WMT_DETECT_INFO_FUNC("wmt_gpio:set GPIO_COMBO_RST_PIN to GPIO_PULL_DIS done!\n");
+	} else
+		WMT_DETECT_ERR_FUNC("wmt_gpio:set GPIO_COMBO_RST_PIN to GPIO_PULL_DIS fail, is NULL!\n");
 	_wmt_detect_output_low(GPIO_COMBO_RST_PIN);
 
 #if 0

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -36,6 +49,7 @@
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
 #include <linux/kthread.h>
+#include <linux/seq_file.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -50,6 +64,13 @@
 #include <linux/of_address.h>
 #endif
 
+/* the new efuse cali has 2 regs, and the old has one only */
+#if defined(NEW_EFUSE_CALI_REG)
+#define EFUSE_CALI_REG        1
+#else
+#define EFUSE_CALI_REG        0
+#endif
+
 #if !defined(CONFIG_MTK_CLKMGR)
 #ifdef CONFIG_OF
 static struct clk *clk_auxadc;
@@ -58,7 +79,7 @@ static struct clk *clk_auxadc;
 #ifdef CONFIG_OF
 void __iomem *auxadc_base = NULL;
 void __iomem *auxadc_apmix_base = NULL;
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
+#if defined(EFUSE_CALI)
 void __iomem *auxadc_efuse_base = NULL;
 #endif
 #endif
@@ -66,7 +87,7 @@ void __iomem *auxadc_efuse_base = NULL;
 #if !defined(CONFIG_MTK_CLKMGR)
 #include <linux/clk.h>
 #else
-/*#include <cust_adc.h>*/		/* generate by DCT Tool */
+/*#include <cust_adc.h>*//* generate by DCT Tool */
 #include <mach/mt_clkmgr.h>
 #endif
 
@@ -157,7 +178,9 @@ static int auxadc_out_data[2] = { 1, 1 };
 static DEFINE_MUTEX(auxadc_mutex);
 static DEFINE_MUTEX(mutex_get_cali_value);
 static int adc_auto_set;
+#if !defined(CONFIG_AUXADC_NOT_CONTROL_APMIXED_BASE)
 static int adc_rtp_set = 1;
+#endif
 
 static dev_t auxadc_cali_devno;
 static int auxadc_cali_major;
@@ -169,8 +192,74 @@ static int g_start_debug_thread;
 
 static int g_adc_init_flag;
 
+static u32 cali_reg;
+#if defined(EFUSE_CALI)
+#if EFUSE_CALI_REG
+static u32 cali_ge_reg;
+static u32 cali_oe_reg;
+#endif
+#endif
+static u32 cali_oe;
+static u32 cali_ge;
+static u32 cali_ge_a;
+static u32 cali_oe_a;
+static u32 gain;
+
+static void mt_auxadc_update_cali(void)
+{
+	cali_oe = 0;
+	cali_ge = 0;
+
+#if defined(EFUSE_CALI)
+	cali_reg = (*(volatile unsigned int *const)(ADC_CALI_EN_A_REG));
+#if EFUSE_CALI_REG
+	cali_ge_reg = (*(volatile unsigned int *const)(ADC_GE_A_REG));
+	cali_oe_reg = (*(volatile unsigned int *const)(ADC_OE_A_REG));
+#endif
+	if (((cali_reg & ADC_CALI_EN_A_MASK) >> ADC_CALI_EN_A_SHIFT) != 0) {
+#if EFUSE_CALI_REG
+		cali_oe_a = (cali_oe_reg & ADC_OE_A_MASK) >> ADC_OE_A_SHIFT;
+		cali_ge_a = ((cali_ge_reg & ADC_GE_A_MASK) >> ADC_GE_A_SHIFT);
+#else
+		cali_oe_a = (cali_reg & ADC_OE_A_MASK) >> ADC_OE_A_SHIFT;
+		cali_ge_a = ((cali_reg & ADC_GE_A_MASK) >> ADC_GE_A_SHIFT);
+#endif
+		cali_ge = cali_ge_a - 512;
+		cali_oe = cali_oe_a - 512;
+		gain = 1 + cali_ge;
+	}
+	/*pr_debug("[AUXADC] cali_reg=%x,cali_oe_a(%x), cali_ge_a(%x),cali_ge(%x),cali_oe(%x),gain(%x)\n",
+	     cali_reg, cali_oe_a, cali_ge_a, cali_ge, cali_oe, gain);*/
+#endif
+}
+
+static void mt_auxadc_get_cali_data(unsigned int rawdata, int data[4], bool enable_cali)
+{
+
+	if (enable_cali == true) {
+#if defined(EFUSE_CALI)
+		rawdata = rawdata - cali_oe;
+		data[0] = (rawdata * 1500 / (4096 + cali_ge)) / 1000;	/* convert to volt */
+		data[1] = (rawdata * 150 / (4096 + cali_ge)) % 100;  /* convert to mv, need multiply 10 */
+		data[2] = (rawdata * 1500 / (4096 + cali_ge)) % 1000; /* data[2] provide high precision mv */
+#else
+		data[0] = (rawdata * 150 / AUXADC_PRECISE / 100);
+		data[1] = ((rawdata * 150 / AUXADC_PRECISE) % 100);
+		data[2] = ((rawdata * 1500 / AUXADC_PRECISE) % 1000);
+#endif
+	} else {
+		data[0] = (rawdata * 150 / AUXADC_PRECISE / 100);
+		data[1] = ((rawdata * 150 / AUXADC_PRECISE) % 100);
+		data[2] = ((rawdata * 1500 / AUXADC_PRECISE) % 1000);
+	}
+}
 
 
+#if defined(CONFIG_AUXADC_NOT_CONTROL_APMIXED_BASE)
+static void mt_auxadc_disable_penirq(void)
+{
+}
+#else
 static u16 mt_tpd_read_adc(u16 pos)
 {
 	AUXADC_DRV_SetBits16((volatile u16 *)AUXADC_TP_ADDR, pos);
@@ -191,6 +280,7 @@ static void mt_auxadc_disable_penirq(void)
 		mt_tpd_read_adc(TP_CMD_ADDR_X);
 	}
 }
+#endif
 
 /* HAL API */
 static int IMM_auxadc_GetOneChannelValue(int dwChannel, int data[4], int *rawdata)
@@ -199,14 +289,7 @@ static int IMM_auxadc_GetOneChannelValue(int dwChannel, int data[4], int *rawdat
 	int idle_count = 0;
 	int data_ready_count = 0;
 	int ret = 0;
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
-	u32 cali_reg = 0;
-	u32 cali_ge_a = 0;
-	u32 cali_oe_a = 0;
-	u32 cali_ge = 0;
-	u32 cali_oe = 0;
-	u32 gain = 1;
-#endif
+
 	mutex_lock(&mutex_get_cali_value);
 
 #if !defined(CONFIG_MTK_CLKMGR)
@@ -231,24 +314,15 @@ static int IMM_auxadc_GetOneChannelValue(int dwChannel, int data[4], int *rawdat
 	}
 #endif
 #endif
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
-	cali_reg = (*(volatile unsigned int * const)(ADC_CALI_EN_A_REG));
-	if ((cali_reg & (1 << 10)) != 0) {
-		cali_oe_a = cali_reg & 0x3FF;
-		cali_ge_a = ((cali_reg & 0x3FF0000) >> 16);
-		cali_ge = (cali_ge_a - 512)/4096;
-		cali_oe = cali_oe_a - 512;
-		gain = 1 + cali_ge;
-	}
-	pr_debug("[AUXADC] cali_reg(%x),cali_oe_a(%x), cali_ge_a(%x),cali_ge(%x),cali_oe(%x),gain(%x)\n",
-		(cali_reg & (1 << 10)), cali_oe_a, cali_ge_a, cali_ge, cali_oe, gain);
-#endif
+
+	mt_auxadc_update_cali();
+
 	if (dwChannel == PAD_AUX_XP || dwChannel == PAD_AUX_YM)
 		mt_auxadc_disable_penirq();
 	/* step1 check con2 if auxadc is busy */
 	while (AUXADC_DRV_ReadReg16((volatile u16 *)AUXADC_CON2) & 0x01) {
 		pr_debug("[adc_api]: wait for module idle\n");
-		msleep(100);
+		mdelay(1);
 		idle_count++;
 		if (idle_count > 30) {
 			/* wait for idle time out */
@@ -267,7 +341,7 @@ static int IMM_auxadc_GetOneChannelValue(int dwChannel, int data[4], int *rawdat
 	/* step3  read channel and make sure old ready bit ==0 */
 	while (AUXADC_DRV_ReadReg16(AUXADC_DAT0 + dwChannel * 0x04) & (1 << 12)) {
 		pr_debug("[adc_api]: wait for channel[%d] ready bit clear\n", dwChannel);
-		msleep(20);
+		mdelay(1);
 		data_ready_count++;
 		if (data_ready_count > 30) {
 			/* wait for idle time out */
@@ -286,7 +360,7 @@ static int IMM_auxadc_GetOneChannelValue(int dwChannel, int data[4], int *rawdat
 	udelay(25);		/* we must dealay here for hw sample cahnnel data */
 	while (0 == (AUXADC_DRV_ReadReg16(AUXADC_DAT0 + dwChannel * 0x04) & (1 << 12))) {
 		pr_debug("[adc_api]: wait for channel[%d] ready bit ==1\n", dwChannel);
-		msleep(20);
+		mdelay(1);
 		data_ready_count++;
 
 		if (data_ready_count > 30) {
@@ -299,21 +373,11 @@ static int IMM_auxadc_GetOneChannelValue(int dwChannel, int data[4], int *rawdat
 	/* step6 read data */
 
 	channel[dwChannel] = AUXADC_DRV_ReadReg16(AUXADC_DAT0 + dwChannel * 0x04) & 0x0FFF;
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
-	if (NULL != rawdata)
-		*rawdata = (channel[dwChannel] - cali_oe)/gain;
 
-	pr_debug("[adc_api: imm mode raw data => channel[%d] = %d\n", dwChannel, channel[dwChannel]);
-	data[0] = (channel[dwChannel] / 1000);
-	data[1] = (channel[dwChannel] % 1000);
-	pr_debug("[adc_api]: imm mode => channel[%d] = %d.%02d\n", dwChannel, data[0], data[1]);
-#else
 	if (NULL != rawdata)
 		*rawdata = channel[dwChannel];
+	mt_auxadc_get_cali_data(channel[dwChannel], data, true);
 
-	data[0] = (channel[dwChannel] * 150 / AUXADC_PRECISE / 100);
-	data[1] = ((channel[dwChannel] * 150 / AUXADC_PRECISE) % 100);
-#endif
 #if !defined(CONFIG_MTK_CLKMGR)
 	if (clk_auxadc) {
 		clk_disable_unprepare(clk_auxadc);
@@ -358,32 +422,24 @@ static int IMM_auxadc_GetOneChannelValue_Cali(int Channel, int *voltage)
 
 }
 
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
-static struct task_struct *thread;
-
-static int auxadc_test_cali(void *unused)
-{
-	int data[4], raw;
-
-	do {
-		msleep(5000);
-		IMM_auxadc_GetOneChannelValue(0, data, &raw);
-		pr_debug("[AUXADC] adc channel 0 value: (%d);%d.%d\n", raw, data[0], data[1]);
-	} while (1);
-
-	return 0;
-}
-#endif
 static void mt_auxadc_cal_prepare(void)
 {
 	/* no voltage calibration */
 }
 
+#if defined(CONFIG_AUXADC_NEED_POWER_ON)
+static void mt_auxadc_power_on(void)
+{
+	AUXADC_DRV_SetBits16((volatile u16 *)AUXADC_MISC, 1 << 14);	/* power on ADC */
+}
+#else
+static void mt_auxadc_power_on(void)
+{
+}
+#endif
+
 void mt_auxadc_hal_init(struct platform_device *dev)
 {
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
-	int err = 0;
-#endif
 #ifdef CONFIG_OF
 	struct device_node *node;
 
@@ -403,34 +459,33 @@ void mt_auxadc_hal_init(struct platform_device *dev)
 	if (!auxadc_base)
 		pr_err("[AUXADC] base failed\n");
 
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
+#if defined(EFUSE_CALI)
 	node = of_find_compatible_node(NULL, NULL, "mediatek,EFUSEC");
 	if (!node)
-		pr_debug("[AUXADC] find node failed\n");
+		pr_err("[AUXADC] find node failed\n");
 
 	auxadc_efuse_base = of_iomap(node, 0);
 	if (!auxadc_efuse_base)
-		pr_debug("[AUXADC] auxadc_efuse_base base failed\n");
+		pr_err("[AUXADC] auxadc_efuse_base base failed\n");
 
 	pr_debug("[AUXADC]: auxadc_efuse_base:0x%p\n", auxadc_efuse_base);
 #endif
 	pr_debug("[AUXADC]: auxadc:0x%p\n", auxadc_base);
 
 #endif
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
-	thread = kthread_run(auxadc_test_cali, 0, "adc_cali_test");
-	if (IS_ERR(thread)) {
-		err = PTR_ERR(thread);
-		pr_debug("[AUXADC] failed to create kernel thread: %d\n", err);
-	}
-#endif
+
 	mt_auxadc_cal_prepare();
+	mt_auxadc_power_on();
+
 	/* AUXADC_DRV_SetBits16((volatile u16 *)AUXADC_CON_RTP, 1);             //disable RTP */
 }
 
+
+#ifdef CONFIG_PM
 static void mt_auxadc_hal_suspend(void)
 {
 	pr_debug("******** MT auxadc driver suspend!! ********\n");
+#if !defined(AUXADC_CLOCK_BY_SPM)
 #if !defined(CONFIG_MTK_CLKMGR)
 	if (clk_auxadc)
 		clk_disable_unprepare(clk_auxadc);
@@ -440,26 +495,41 @@ static void mt_auxadc_hal_suspend(void)
 		pr_err("hwEnableClock AUXADC failed.");
 #endif
 #endif
+#endif
 }
 
 static void mt_auxadc_hal_resume(void)
 {
 	pr_debug("******** MT auxadc driver resume!! ********\n");
+#if !defined(AUXADC_CLOCK_BY_SPM)
 #if !defined(CONFIG_MTK_CLKMGR)
 	if (clk_auxadc)
-		clk_prepare_enable(clk_auxadc);
+		if (clk_prepare_enable(clk_auxadc))
+			pr_err("AUXADC clk_prepare_enable failed!");
 #else
 #ifndef CONFIG_MTK_FPGA
 	if (enable_clock(MT_PDN_PERI_AUXADC, "AUXADC"))
 		pr_err("hwEnableClock AUXADC failed!!!.");
 #endif
 #endif
-
+#endif
+	mt_auxadc_power_on();
 	/* AUXADC_DRV_SetBits16((volatile u16 *)AUXADC_CON_RTP, 1);             //disable RTP */
 }
+#endif
 
 static int mt_auxadc_dump_register(char *buf)
 {
+	if (buf == NULL) {
+		pr_debug("[%s] Invalid input!!\n", __func__);
+		return 0;
+	}
+
+	if (strlen(buf) < 64) {
+		pr_debug("[%s] Invalid input!!\n", __func__);
+		return 0;
+	}
+
 	pr_debug("[auxadc]: AUXADC_CON0=%x\n", *(volatile u16 *)AUXADC_CON0);
 	pr_debug("[auxadc]: AUXADC_CON1=%x\n", *(volatile u16 *)AUXADC_CON1);
 	pr_debug("[auxadc]: AUXADC_CON2=%x\n", *(volatile u16 *)AUXADC_CON2);
@@ -480,12 +550,18 @@ int IMM_IsAdcInitReady(void)
 
 int IMM_get_adc_channel_num(char *channel_name, int len)
 {
-	unsigned int i;
+	unsigned int i = 0;
+	int ret = 0;
 
-	pr_debug("[ADC] name = %s\n", channel_name);
-	pr_debug("[ADC] name_len = %d\n", len);
+	if (NULL == channel_name) {
+		pr_err("[ADC] error: channel_name is NULL!\n");
+		return -1;
+	}
+
+	pr_debug("[ADC] name=%s, name_len=%d\n", channel_name, len);
 	for (i = 0; i < ADC_CHANNEL_MAX; i++) {
-		if (!strncmp(channel_name, g_adc_info[i].channel_name, len))
+		ret = strncmp(channel_name, g_adc_info[i].channel_name, len);
+		if (!ret)
 			return g_adc_info[i].channel_number;
 	}
 	pr_err("[ADC] find channel number failed\n");
@@ -582,6 +658,30 @@ static long auxadc_cali_unlocked_ioctl(struct file *file, unsigned int cmd, unsi
 	return 0;
 }
 
+#ifdef CONFIG_COMPAT
+static long compat_auxadc_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+
+	if (!filp->f_op || !filp->f_op->unlocked_ioctl) {
+		pr_err("compat_ion_ioctl file has no f_op or no f_op->unlocked_ioctl.\n");
+		return -ENOTTY;
+	}
+
+	switch (cmd) {
+	case TEST_ADC_CALI_PRINT:
+	case SET_ADC_CALI_Slop:
+	case SET_ADC_CALI_Offset:
+	case SET_ADC_CALI_Cal:
+	case ADC_CHANNEL_READ:
+		return filp->f_op->unlocked_ioctl(filp, cmd,
+			(unsigned long)compat_ptr(arg));
+	default:
+		pr_err("compat_ion_ioctl : No such command!! 0x%x\n", cmd);
+		return -ENOIOCTLCMD;
+	}
+}
+#endif
+
 static int auxadc_cali_open(struct inode *inode, struct file *file)
 {
 	return 0;
@@ -597,6 +697,9 @@ static const struct file_operations auxadc_cali_fops = {
 	.unlocked_ioctl = auxadc_cali_unlocked_ioctl,
 	.open = auxadc_cali_open,
 	.release = auxadc_cali_release,
+#if IS_ENABLED(CONFIG_COMPAT)
+	.compat_ioctl = compat_auxadc_unlocked_ioctl,
+#endif
 };
 
 /* ///////////////////////////////////////////////////////////////////////////////////////// */
@@ -1299,6 +1402,11 @@ static DEVICE_ATTR(AUXADC_Channel_Is_Calibration, 0664, show_AUXADC_Channel_Is_C
 
 static ssize_t show_AUXADC_register(struct device *dev, struct device_attribute *attr, char *buf)
 {
+	if (buf == NULL) {
+		pr_debug("[%s] Invalid input!!\n", __func__);
+		return 0;
+	}
+
 	return mt_auxadc_dump_register(buf);
 }
 
@@ -1316,8 +1424,13 @@ static ssize_t show_AUXADC_chanel(struct device *dev, struct device_attribute *a
 {
 	/* read data */
 	int i = 0, data[4] = { 0, 0, 0, 0 };
-	char buf_temp[960];
+	char buf_temp[256];
 	int res = 0;
+
+	if (buf == NULL) {
+		pr_debug("[%s] Invalid input!!\n", __func__);
+		return 0;
+	}
 
 	for (i = 0; i < 5; i++) {
 		res = IMM_auxadc_GetOneChannelValue(i, data, NULL);
@@ -1326,11 +1439,11 @@ static ssize_t show_AUXADC_chanel(struct device *dev, struct device_attribute *a
 		} else {
 			pr_debug("[adc_driver]: channel[%d]=%d.%d\n", i, data[0], data[1]);
 			sprintf(buf_temp, "channel[%d]=%d.%d\n", i, data[0], data[1]);
-			strcat(buf, buf_temp);
+			strncat(buf, buf_temp, strlen(buf_temp));
 		}
 	}
 	mt_auxadc_dump_register(buf_temp);
-	strcat(buf, buf_temp);
+	strncat(buf, buf_temp, strlen(buf_temp));
 	return strlen(buf);
 }
 
@@ -1357,12 +1470,9 @@ static int dbug_thread(void *unused)
 			} else
 				pr_debug("[adc_driver]: channel[%d] cali_voltage =%d\n", i,
 					 cali_voltage);
-
 			msleep(500);
-
 		}
 		msleep(500);
-
 	}
 	return 0;
 }
@@ -1371,22 +1481,31 @@ static int dbug_thread(void *unused)
 static ssize_t store_AUXADC_channel(struct device *dev, struct device_attribute *attr,
 				    const char *buf, size_t size)
 {
-	char start_flag;
-	int error;
+	int start_flag = 0;
+	int error = 0;
+	int ret = 0;
 
-	if (sscanf(buf, "%s", &start_flag) != 1) {
-		pr_debug("[adc_driver]: Invalid values\n");
-		return -EINVAL;
+	if (buf == NULL) {
+		pr_debug("[%s] Invalid input!!\n", __func__);
+		return 0;
 	}
-	pr_debug("[adc_driver] start flag =%d\n", start_flag);
-	g_start_debug_thread = start_flag;
-	if (1 == start_flag) {
-		thread = kthread_run(dbug_thread, 0, "AUXADC");
 
+	ret = kstrtoint(buf, sizeof(int), &start_flag);
+	if (ret < 0) {
+		pr_debug("[%s] Invalid invalues!!\n", __func__);
+		return 0;
+	}
+
+	pr_debug("[adc_driver] start flag =%d\n", start_flag);
+	if (start_flag) {
+		g_start_debug_thread = start_flag;
+		thread = kthread_run(dbug_thread, 0, "AUXADC");
 		if (IS_ERR(thread)) {
 			error = PTR_ERR(thread);
 			pr_debug("[adc_driver] failed to create kernel thread: %d\n", error);
 		}
+	} else {
+		pr_debug("[%s] Invalid input!!\n", __func__);
 	}
 
 	return size;
@@ -1543,6 +1662,66 @@ exit:
 	return 1;
 }
 
+
+static int proc_utilization_show(struct seq_file *m, void *v)
+{
+	int i, res;
+	int data[4] = { 0, 0, 0, 0 };
+
+	seq_puts(m, "********** Auxadc status dump **********\n");
+
+	seq_printf(m, "reg=0x%x ADC_GE_A=%d ADC_OE_A=%d GE:%d OE:%d gain:0x%x\n",
+	cali_reg, cali_ge_a, cali_oe_a, cali_ge, cali_oe, gain);
+#if defined(EFUSE_CALI)
+	seq_printf(m, "ADC_GE_A_MASK:0x%x ADC_GE_A_SHIFT:0x%x\n", ADC_GE_A_MASK, ADC_GE_A_SHIFT);
+	seq_printf(m, "ADC_OE_A_MASK:0x%x ADC_OE_A_SHIFT:0x%x\n", ADC_OE_A_MASK, ADC_OE_A_SHIFT);
+	seq_printf(m, "ADC_CALI_EN_A_MASK:0x%x ADC_CALI_EN_A_SHIFT:0x%x\n", ADC_CALI_EN_A_MASK,
+		ADC_CALI_EN_A_SHIFT);
+#endif
+	for (i = 100; i <= 1000; i = i + 100) {
+		mt_auxadc_get_cali_data(i, data, true);
+		seq_printf(m, "raw:%d data:%d %d %d with cali\n", i, data[0], data[1], data[2]);
+		mt_auxadc_get_cali_data(i, data, false);
+		seq_printf(m, "raw:%d data:%d %d %d without cali\n", i, data[0], data[1], data[2]);
+	}
+
+	for (i = 0; i < 5; i++) {
+		res = IMM_auxadc_GetOneChannelValue(i, data, NULL);
+		if (res < 0)
+			seq_printf(m, "[adc_driver]: get data error res:%d\n", res);
+		else
+			seq_printf(m, "channel[%d]=%d.%d %d\n", i, data[0], data[1], data[2]);
+	}
+
+	return 0;
+}
+
+static int proc_utilization_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, proc_utilization_show, NULL);
+}
+
+static const struct file_operations auxadc_debug_proc_fops = {
+	.open = proc_utilization_open,
+	.read = seq_read,
+};
+
+
+static void adc_debug_init(void)
+{
+	struct proc_dir_entry *mt_auxadc_dir;
+
+	mt_auxadc_dir = proc_mkdir("mt-auxadc", NULL);
+	if (!mt_auxadc_dir) {
+		pr_err("fail to mkdir /proc/mt-auxadc\n");
+		return;
+	}
+	proc_create("dump_auxadc_status", S_IRUGO | S_IWUSR, mt_auxadc_dir, &auxadc_debug_proc_fops);
+	pr_err("proc_create auxadc_debug_proc_fops\n");
+}
+
+
+
 /* platform_driver API */
 static int mt_auxadc_probe(struct platform_device *dev)
 {
@@ -1668,6 +1847,27 @@ static int mt_auxadc_probe(struct platform_device *dev)
 			pr_warn("[AUXADC_AP] find node REF_CURRENT:%d\n", of_value);
 			used_channel_counter++;
 		}
+		ret = of_property_read_u32_array(node, "mediatek,board_id", &of_value, 1);
+		if (ret == 0) {
+			sprintf(g_adc_info[used_channel_counter].channel_name, "BOARD_ID");
+			g_adc_info[used_channel_counter].channel_number = of_value;
+			pr_warn("[AUXADC_AP] find node BOARD_ID:%d\n", of_value);
+			used_channel_counter++;
+		}
+		ret = of_property_read_u32_array(node, "mediatek,board_id_2", &of_value, 1);
+		if (ret == 0) {
+			sprintf(g_adc_info[used_channel_counter].channel_name, "BOARD_ID_2");
+			g_adc_info[used_channel_counter].channel_number = of_value;
+			pr_warn("[AUXADC_AP] find node BOARD_ID_2:%d\n", of_value);
+			used_channel_counter++;
+		}
+		ret = of_property_read_u32_array(node, "mediatek,board_id_3", &of_value, 1);
+		if (ret == 0) {
+			sprintf(g_adc_info[used_channel_counter].channel_name, "BOARD_ID_3");
+			g_adc_info[used_channel_counter].channel_number = of_value;
+			pr_warn("[AUXADC_AP] find node BOARD_ID_3:%d\n", of_value);
+			used_channel_counter++;
+		}
 	} else {
 		pr_err("[AUXADC_AP] find node failed\n");
 	}
@@ -1690,11 +1890,11 @@ static int mt_auxadc_probe(struct platform_device *dev)
 #else
 #endif
 
+	adc_debug_init();
+
 	g_adc_init_flag = 1;
 
-	if (mt_auxadc_create_device_attr(adc_dev))
-		goto exit;
-exit:
+	mt_auxadc_create_device_attr(adc_dev);
 	return ret;
 }
 
@@ -1709,6 +1909,8 @@ static void mt_auxadc_shutdown(struct platform_device *dev)
 	pr_debug("******** MT auxadc driver shutdown!! ********\n");
 }
 
+
+#ifdef CONFIG_PM
 static int mt_auxadc_suspend(struct platform_device *dev, pm_message_t state)
 {
 	/* pr_debug("******** MT auxadc driver suspend!! ********\n" ); */
@@ -1722,12 +1924,16 @@ static int mt_auxadc_resume(struct platform_device *dev)
 	mt_auxadc_hal_resume();
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_OF
 static const struct of_device_id mt_auxadc_of_match[] = {
 	{.compatible = "mediatek,mt6735-auxadc",},
 	{.compatible = "mediatek,mt6797-auxadc",},
 	{.compatible = "mediatek,mt6755-auxadc",},
+	{.compatible = "mediatek,mt6757-auxadc",},
+	{.compatible = "mediatek,elbrus-auxadc",},
+	{.compatible = "mediatek,ap-auxadc",},
 	{},
 };
 #endif

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /******************************************************************************
 *
  *
@@ -88,8 +101,7 @@ typedef struct {
 	kal_uint32 MemIfNum;
 	bool interruptTrigger;
 	spinlock_t substream_lock;
-	void (*offloadCbk)(void *stream);
-	void *offloadstream;
+	bool mWaitForIRQ;
 } AFE_MEM_CONTROL_T;
 
 struct pcm_afe_info {
@@ -116,5 +128,18 @@ typedef struct {
 
 } AFE_DL_ABNORMAL_CONTROL_T;
 
+struct mtk_dai {
+	bool enable;
+	uint32_t sample_rate;
+};
+
+typedef struct {
+	kal_int8 *pBufferBase;
+	kal_int8 *pBufferIndx;
+	kal_uint32 u4BufferSize;
+	kal_uint32 u4BufferSizeMax;
+
+	kal_uint32 u4IsrConsumeSize;
+} AFE_DL_ISR_COPY_T;
 
 #endif

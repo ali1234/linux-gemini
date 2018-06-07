@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
@@ -28,7 +41,6 @@
 
 #include <linux/kthread.h>
 #include <linux/delay.h>
-#include <linux/rtpm_prio.h>
 
 
 #ifdef CMDQ_SECURE_PATH_SUPPORT
@@ -73,7 +85,7 @@ static DEFINE_SPINLOCK(gCmdqThreadLock);
 static atomic_t gCmdqThreadUsage;
 static atomic_t gSMIThreadUsage;
 static bool gCmdqSuspended;
-static bool gCmdqEarlySuspended;
+static atomic_t gCmdqEarlySuspended;
 static DEFINE_SPINLOCK(gCmdqExecLock);
 static DEFINE_SPINLOCK(gCmdqRecordLock);
 
@@ -136,7 +148,7 @@ static int cmdq_core_print_log_kthread(void *data)
 	uint32_t msgOffset;
 	int32_t msgMAXSize;
 	bool needPrintLog;
-	struct sched_param param = {.sched_priority = RTPM_PRIO_SCRN_UPDATE };
+	struct sched_param param = {.sched_priority = 94};
 
 	sched_setscheduler(current, SCHED_RR, &param);
 
@@ -584,9 +596,9 @@ ssize_t cmdqCorePrintStatus(struct device *dev, struct device_attribute *attr, c
 	};
 	static const char *const listNames[] = { "Free", "Active", "Wait" };
 
-	const enum CMDQ_ENG_ENUM engines[] = { CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_ENUM) };
-	static const char *const engineNames[] = {
-	    CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_STRING) };
+	const enum CMDQ_ENG_ENUM engines[] = CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_ENUM);
+	static const char *const engineNames[] =
+	    CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_STRING);
 
 	cmdqCorePrintStatus_idv(pBuffer);
 
@@ -1055,9 +1067,9 @@ int cmdqCorePrintStatusSeq(struct seq_file *m, void *v)
 	};
 	static const char *const listNames[] = { "Free", "Active", "Wait" };
 
-	const enum CMDQ_ENG_ENUM engines[] = { CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_ENUM) };
-	static const char *const engineNames[] = {
-	    CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_STRING) };
+	const enum CMDQ_ENG_ENUM engines[] = CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_ENUM);
+	static const char *const engineNames[] =
+	    CMDQ_FOREACH_STATUS_MODULE_PRINT(GENERATE_STRING);
 
 	cmdqCorePrintStatusSeq_idv(m);
 
@@ -1569,6 +1581,9 @@ int32_t cmdqCoreInitialize(void)
 #ifdef CMDQ_SECURE_PATH_SUPPORT
 	cmdqSecInitialize();
 #endif
+
+	gCmdqPrint.CmdqPrintWQ = create_singlethread_workqueue("cmdq_print_count_of_submitted_task");
+	INIT_WORK(&gCmdqPrint.CmdqPrintWork, cmdq_core_run_print_log);
 	return 0;
 }
 
@@ -4990,7 +5005,7 @@ static int32_t cmdq_core_exec_task_async_secure_impl(struct TaskStruct *pTask,
 #endif
 }
 
-static inline int32_t cmdq_core_exec_find_task_slot(struct TaskStruct *pLast, struct TaskStruct *pTask,
+static inline int32_t cmdq_core_exec_find_task_slot(struct TaskStruct **pLast, struct TaskStruct *pTask,
 						    int32_t thread, int32_t loop)
 {
 	int32_t status = 0;
@@ -5077,9 +5092,9 @@ static inline int32_t cmdq_core_exec_find_task_slot(struct TaskStruct *pLast, st
 			/* re-fetch command buffer again. */
 			cmdq_core_invalidate_hw_fetched_buffer(thread);
 #endif
-			if (pLast == pTask) {
+			if (*pLast == pTask) {
 				CMDQ_LOG("update pLast from 0x%p to 0x%p\n", pTask, pPrev);
-				pLast = pPrev;
+				*pLast = pPrev;
 			}
 		} else {
 			CMDQ_MSG("Set current(%d) order for the new task, line:%d\n", index, __LINE__);
@@ -5103,7 +5118,7 @@ static inline int32_t cmdq_core_exec_find_task_slot(struct TaskStruct *pLast, st
 		}
 	}
 
-	CMDQ_MSG("Reorder %d tasks for performance end, pLast:0x%p\n", loop, pLast);
+	CMDQ_MSG("Reorder %d tasks for performance end, pLast:0x%p\n", loop, *pLast);
 
 	return status;
 }
@@ -5342,7 +5357,7 @@ static int32_t cmdq_core_exec_task_async_impl(struct TaskStruct *pTask, int32_t 
 			/* By default, pTask is the last task, and insert [cookie % CMDQ_MAX_TASK_IN_THREAD] */
 			pLast = pTask;	/* Default last task */
 
-			status = cmdq_core_exec_find_task_slot(pLast, pTask, thread, loop);
+			status = cmdq_core_exec_find_task_slot(&pLast, pTask, thread, loop);
 			if (status < 0) {
 #ifdef CMDQ_APPEND_WITHOUT_SUSPEND
 				cmdqCoreSetEvent(CMDQ_SYNC_TOKEN_APPEND_THR(thread));
@@ -5915,19 +5930,19 @@ int32_t cmdqCoreEarlySuspend(void)
 {
 	/* destroy secure path notify thread */
 	cmdq_core_stop_secure_path_notify_thread();
-	gCmdqEarlySuspended = true;
+	atomic_set(&gCmdqEarlySuspended, 1);
 	return 0;
 }
 
 int32_t cmdqCoreLateResume(void)
 {
-	gCmdqEarlySuspended = false;
+	atomic_set(&gCmdqEarlySuspended, 0);
 	return 0;
 }
 
 bool cmdqCoreIsEarlySuspended(void)
 {
-	return gCmdqEarlySuspended;
+	return atomic_read(&gCmdqEarlySuspended);
 }
 
 static int32_t cmdq_core_exec_task_async_with_retry(struct TaskStruct *pTask, int32_t thread)
@@ -6197,8 +6212,9 @@ int32_t cmdqCoreReleaseTask(struct TaskStruct *pTask)
 			BUG_ON(pThread->taskCount > 1);
 
 			/* suspend and reset the thread */
-			status = cmdq_core_suspend_HW_thread(thread);
-			BUG_ON(status < 0);
+			/* might meet unsuspendable situation, can be ignored due to following reset */
+			/* status = cmdq_core_suspend_HW_thread(thread); */
+			/* BUG_ON(status < 0); */
 			pThread->taskCount = 0;
 			cmdq_core_disable_HW_thread(thread);
 		} else {

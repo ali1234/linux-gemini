@@ -607,8 +607,13 @@ jsctx_rb_remove(struct kbase_context *kctx, struct kbase_jd_atom *katom)
 	lockdep_assert_held(&kctx->kbdev->js_data.runpool_irq.lock);
 
 	/* Atoms must be completed in order. */
-	WARN_ON(rb->entries[rb->running_idx & JSCTX_RB_MASK].atom_id !=
-			kbase_jd_atom_id(kctx, katom));
+    /// too much log in mt6755
+	///WARN_ON(rb->entries[rb->running_idx & JSCTX_RB_MASK].atom_id !=
+	///		kbase_jd_atom_id(kctx, katom));
+	if(rb->entries[rb->running_idx & JSCTX_RB_MASK].atom_id !=
+			kbase_jd_atom_id(kctx, katom)){
+        pr_alert("[Mali] atom_id = %d, atom_offset = %d \n", rb->entries[rb->running_idx & JSCTX_RB_MASK].atom_id, kbase_jd_atom_id(kctx, katom));
+    }
 
 	rb->running_idx++;
 }
@@ -774,7 +779,7 @@ int kbasep_js_devdata_init(struct kbase_device * const kbdev)
 			jsdd->soft_stop_ticks < jsdd->hard_stop_ticks_dumping &&
 			jsdd->hard_stop_ticks_dumping <
 			jsdd->gpu_reset_ticks_dumping)) {
-		dev_err(kbdev->dev, "Job scheduler timeouts invalid; soft/hard/reset tick counts should be in increasing order\n");
+		dev_MTK_err(kbdev->dev, "Job scheduler timeouts invalid; soft/hard/reset tick counts should be in increasing order\n");
 		return -EINVAL;
 	}
 

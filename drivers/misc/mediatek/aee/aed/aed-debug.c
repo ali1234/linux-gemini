@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -540,6 +553,38 @@ static ssize_t proc_generate_md32_write(struct file *file,
 	return 0;
 }
 
+static ssize_t proc_generate_scp_read(struct file *file,
+				       char __user *buf, size_t size, loff_t *ppos)
+{
+#define TEST_SCP_PHY_SIZE	65536
+	char buffer[BUFSIZE];
+	int i;
+	char *ptr;
+
+	if ((*ppos)++)
+		return 0;
+	ptr = kmalloc(TEST_SCP_PHY_SIZE, GFP_KERNEL);
+	if (ptr == NULL) {
+		LOGE("proc_generate_scp_read kmalloc fail\n");
+		return sprintf(buffer, "kmalloc fail\n");
+	}
+	for (i = 0; i < TEST_SCP_PHY_SIZE; i++)
+		ptr[i] = (i % 26) + 'a';
+
+	sprintf(buffer, "SCP EE log here\n");
+	aed_scp_exception((int *)buffer, (int)sizeof(buffer), (int *)ptr, TEST_SCP_PHY_SIZE, __FILE__);
+	kfree(ptr);
+
+	return sprintf(buffer, "SCP EE Generated\n");
+}
+
+static ssize_t proc_generate_scp_write(struct file *file,
+					const char __user *buf, size_t size, loff_t *ppos)
+{
+	return 0;
+}
+
+
 static ssize_t proc_generate_kernel_notify_read(struct file *file,
 						char __user *buf, size_t size, loff_t *ppos)
 {
@@ -634,6 +679,7 @@ AED_FILE_OPS(generate_wdt);
 AED_FILE_OPS(generate_ee);
 AED_FILE_OPS(generate_combo);
 AED_FILE_OPS(generate_md32);
+AED_FILE_OPS(generate_scp);
 AED_FILE_OPS(generate_dal);
 
 int aed_proc_debug_init(struct proc_dir_entry *aed_proc_dir)
@@ -645,6 +691,7 @@ int aed_proc_debug_init(struct proc_dir_entry *aed_proc_dir)
 	AED_PROC_ENTRY(generate-ee, generate_ee, S_IRUSR);
 	AED_PROC_ENTRY(generate-combo, generate_combo, S_IRUSR);
 	AED_PROC_ENTRY(generate-md32, generate_md32, S_IRUSR);
+	AED_PROC_ENTRY(generate-scp, generate_scp, S_IRUSR);
 	AED_PROC_ENTRY(generate-dal, generate_dal, S_IRUSR);
 
 	return 0;
@@ -658,6 +705,7 @@ int aed_proc_debug_done(struct proc_dir_entry *aed_proc_dir)
 	remove_proc_entry("generate-ee", aed_proc_dir);
 	remove_proc_entry("generate-combo", aed_proc_dir);
 	remove_proc_entry("generate-md32", aed_proc_dir);
+	remove_proc_entry("generate-scp", aed_proc_dir);
 	remove_proc_entry("generate-wdt", aed_proc_dir);
 	remove_proc_entry("generate-dal", aed_proc_dir);
 	return 0;

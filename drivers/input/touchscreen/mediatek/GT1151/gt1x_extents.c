@@ -34,6 +34,7 @@
 #endif
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>	/*proc */
+#include <linux/ratelimit.h>
 
 #include <asm/ioctl.h>
 #include "include/gt1x_tpd_common.h"
@@ -119,7 +120,7 @@ int gesture_enter_doze(void)
 			GTP_DEBUG("GTP has been working in doze mode!");
 			return 0;
 		}
-		mdelay(20);
+		msleep(20);
 	}
 	GTP_ERROR("GTP send doze cmd failed.");
 	return -1;
@@ -237,7 +238,7 @@ static s32 hotknot_enter_transfer_mode(void)
 
 	gt1x_irq_disable();
 	gt1x_send_cmd(GTP_CMD_HN_TRANSFER, 0);
-	mdelay(100);
+	msleep(100);
 	gt1x_irq_enable();
 
 	ret = gt1x_i2c_read(0x8140, buffer, sizeof(buffer));
@@ -553,6 +554,10 @@ static s32 io_iic_write(u8 *data)
 	s32 data_length = 0;
 	u16 addr = 0;
 
+	if (data == NULL) {
+		GTP_ERROR("data is null\n");
+		return -1;
+	}
 	addr = data[0] << 8 | data[1];
 	data_length = data[2] << 8 | data[3];
 
@@ -573,6 +578,17 @@ static long gt1x_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	u32 value = 0;
 	s32 ret = 0;		/*the initial value must be 0*/
 	u8 *data = NULL;
+	int cnt = 30;
+	static struct ratelimit_state ratelimit = {
+		.lock = __RAW_SPIN_LOCK_UNLOCKED(ratelimit.lock),
+		.interval = HZ/2,
+		.burst = 1,
+		.begin = 1,
+	};
+
+    /* Blocking when firmwaer updating */
+	while (cnt-- && update_info.status)
+		ssleep(1);
 
 	GTP_DEBUG("IOCTL CMD:%x", cmd);
 	/*GTP_DEBUG("command:%d, length:%d, rw:%s", _IOC_NR(cmd), _IOC_SIZE(cmd),
@@ -607,11 +623,27 @@ static long gt1x_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case IO_IIC_READ:
-		ret = io_iic_read(data, (void __user *)arg);
+		if (1 == gt1x_is_tpd_halt()) {
+			if (__ratelimit(&ratelimit))
+				GTP_ERROR("touch is suspended.");
+			break;
+		}
+		if (data != NULL)
+			ret = io_iic_read(data, (void __user *)arg);
+		else
+			GTP_ERROR("Touch read data is NULL.");
 		break;
 
 	case IO_IIC_WRITE:
-		ret = io_iic_write(data);
+		if (1 == gt1x_is_tpd_halt()) {
+			if (__ratelimit(&ratelimit))
+				GTP_ERROR("touch is suspended.");
+			break;
+		}
+		if (data != NULL)
+			ret = io_iic_write(data);
+		else
+			GTP_ERROR("Touch write data is NULL.");
 		break;
 
 	case IO_RESET_GUITAR:
@@ -697,6 +729,10 @@ static long gt1x_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 
 	case HOTKNOT_LOAD_AUTHENTICATION:
+		if (1 == gt1x_is_tpd_halt()) {
+			GTP_ERROR("touch is suspended.");
+			break;
+		}
 #ifdef CONFIG_GTP_ESD_PROTECT
 		gt1x_esd_switch(SWITCH_ON);
 #endif
@@ -704,6 +740,10 @@ static long gt1x_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 
 	case HOTKNOT_RECOVERY_MAIN:
+		if (1 == gt1x_is_tpd_halt()) {
+			GTP_ERROR("touch is suspended.");
+			break;
+		}
 		ret = hotknot_recovery_main_system();
 		break;
 #ifdef CONFIG_HOTKNOT_BLOCK_RW
@@ -943,3 +983,4 @@ void gt1x_deinit_node(void)
 	misc_deregister(&hotknot_misc_device);
 #endif
 }
+MODULE_LICENSE("GPL");

@@ -177,6 +177,11 @@ static inline bool kmem_cache_has_cpu_partial(struct kmem_cache *s)
  */
 #define DEBUG_METADATA_FLAGS (SLAB_RED_ZONE | SLAB_POISON | SLAB_STORE_USER)
 
+/*
+ * Disable SLAG_STORE_USER for low memory device
+ */
+#define DEBUG_LOWMEM_FLAGS (SLAB_RED_ZONE | SLAB_POISON)
+
 #define OO_SHIFT	16
 #define OO_MASK		((1 << OO_SHIFT) - 1)
 #define MAX_OBJS_PER_PAGE	32767 /* since page.objects is u15 */
@@ -953,12 +958,12 @@ static int check_slab(struct kmem_cache *s, struct page *page)
 	maxobj = order_objects(compound_order(page), s->size, s->reserved);
 	if (page->objects > maxobj) {
 		slab_err(s, page, "objects %u > max %u",
-			s->name, page->objects, maxobj);
+			page->objects, maxobj);
 		return 0;
 	}
 	if (page->inuse > page->objects) {
 		slab_err(s, page, "inuse %u > max %u",
-			s->name, page->inuse, page->objects);
+			page->inuse, page->objects);
 		return 0;
 	}
 	/* Slab_pad_check fixes things up after itself */
@@ -975,7 +980,7 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 	int nr = 0;
 	void *fp;
 	void *object = NULL;
-	unsigned long max_objects;
+	int max_objects;
 
 	fp = page->freelist;
 	while (fp && nr <= page->objects) {
@@ -1202,7 +1207,11 @@ fail:
 
 static int __init setup_slub_debug(char *str)
 {
+#ifdef CONFIG_MTK_LOW_RAM_DEBUG
+	slub_debug = DEBUG_LOWMEM_FLAGS;
+#else
 	slub_debug = DEBUG_DEFAULT_FLAGS;
+#endif
 	if (*str++ != '=' || !*str)
 		/*
 		 * No options specified. Switch on full debugging.
@@ -3134,6 +3143,7 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		return 0;
 
 	s->allocflags = 0;
+	s->allocflags |= GFP_DMA;
 	if (order)
 		s->allocflags |= __GFP_COMP;
 
@@ -4011,6 +4021,12 @@ static int alloc_loc_track(struct loc_track *t, unsigned long max, gfp_t flags)
 	int order;
 
 	order = get_order(sizeof(struct location) * max);
+	/*
+	if backtrace need more page to store
+	we just ignore it in slabtrace
+	 */
+	if (order > 1)
+		return 0;
 
 	l = (void *)__get_free_pages(flags, order);
 	if (!l)
@@ -4079,7 +4095,7 @@ static int add_location(struct loc_track *t, struct kmem_cache *s,
 	/*
 	 * Not found. Insert new tracking element.
 	 */
-	if (t->count >= t->max && !alloc_loc_track(t, 2 * t->max, GFP_ATOMIC|__GFP_NO_KSWAPD))
+	if (t->count >= t->max && !alloc_loc_track(t, 2 * t->max, __GFP_NOMEMALLOC|GFP_NOWAIT|__GFP_NO_KSWAPD))
 		return 0;
 
 	l = t->loc + pos;
@@ -4128,7 +4144,7 @@ static int list_locations(struct kmem_cache *s, char *buf,
 	struct kmem_cache_node *n;
 
 	if (!map || !alloc_loc_track(&t, PAGE_SIZE / sizeof(struct location),
-				     GFP_TEMPORARY|__GFP_NO_KSWAPD)) {
+				     __GFP_NOMEMALLOC|GFP_NOWAIT|__GFP_NO_KSWAPD)) {
 		kfree(map);
 		return sprintf(buf, "Out of memory\n");
 	}
@@ -5460,7 +5476,7 @@ static int mtk_memcfg_add_location(struct loc_track *t, struct kmem_cache *s,
 	/*
 	 * Not found. Insert new tracking element.
 	 */
-	if (t->count >= t->max && !alloc_loc_track(t, 2 * t->max, GFP_ATOMIC|__GFP_NO_KSWAPD))
+	if (t->count >= t->max && !alloc_loc_track(t, 2 * t->max, __GFP_NOMEMALLOC|GFP_NOWAIT|__GFP_NO_KSWAPD))
 		return 0;
 
 	l = t->loc + pos;
@@ -5509,7 +5525,7 @@ static int mtk_memcfg_list_locations(struct kmem_cache *s, struct seq_file *m,
 	struct kmem_cache_node *n;
 
 	if (!map || !alloc_loc_track(&t, PAGE_SIZE / sizeof(struct location),
-				     GFP_TEMPORARY|__GFP_NO_KSWAPD)) {
+				     __GFP_NOMEMALLOC|GFP_NOWAIT|__GFP_NO_KSWAPD)) {
 		kfree(map);
 		return seq_puts(m, "Out of memory\n");
 	}

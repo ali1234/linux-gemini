@@ -1,3 +1,17 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software: you can redistribute it and/or modify it under the terms of the
+* GNU General Public License version 2 as published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+* without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See the GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License along with this program.
+* If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include "p2p_precomp.h"
 
 BOOLEAN
@@ -5,7 +19,7 @@ p2pStateInit_IDLE(IN P_ADAPTER_T prAdapter,
 		  IN P_P2P_FSM_INFO_T prP2pFsmInfo, IN P_BSS_INFO_T prP2pBssInfo, OUT P_ENUM_P2P_STATE_T peNextState)
 {
 	BOOLEAN fgIsTransOut = FALSE;
-/* P_P2P_CHNL_REQ_INFO_T prChnlReqInfo = (P_P2P_CHNL_REQ_INFO_T)NULL; */
+	P_P2P_CHNL_REQ_INFO_T prChnlReqInfo = (P_P2P_CHNL_REQ_INFO_T)NULL;
 
 	do {
 		ASSERT_BREAK((prAdapter != NULL) &&
@@ -13,29 +27,12 @@ p2pStateInit_IDLE(IN P_ADAPTER_T prAdapter,
 
 		if ((prP2pBssInfo->eIntendOPMode == OP_MODE_ACCESS_POINT)
 		    && IS_NET_PWR_STATE_ACTIVE(prAdapter, NETWORK_TYPE_P2P_INDEX)) {
-			P_P2P_CHNL_REQ_INFO_T prChnlReqInfo = &(prP2pFsmInfo->rChnlReqInfo);
-
+			prChnlReqInfo = &prP2pFsmInfo->rChnlReqInfo;
 			fgIsTransOut = TRUE;
 			prChnlReqInfo->eChannelReqType = CHANNEL_REQ_TYPE_GO_START_BSS;
 			*peNextState = P2P_STATE_REQING_CHANNEL;
 
 		} else {
-#if 0
-			else
-		if (IS_NET_PWR_STATE_ACTIVE(prAdapter, NETWORK_TYPE_P2P_INDEX)) {
-
-			ASSERT((prP2pBssInfo->eCurrentOPMode == OP_MODE_ACCESS_POINT) ||
-			       (prP2pBssInfo->eCurrentOPMode == OP_MODE_INFRASTRUCTURE));
-
-			prChnlReqInfo = &prP2pFsmInfo->rChnlReqInfo;
-
-			if (prChnlReqInfo->fgIsChannelRequested) {
-				/* Start a timer for return channel. */
-				DBGLOG(P2P, TRACE, "start a GO channel timer.\n");
-			}
-
-		}
-#endif
 			cnmTimerStartTimer(prAdapter, &(prP2pFsmInfo->rP2pFsmTimeoutTimer), 5000);
 		}
 

@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -64,6 +66,8 @@ AFE_MEM_CONTROL_T  *VUL_Control_context;
 static struct snd_dma_buffer *Capture_dma_buf;
 static AudioDigtalI2S *mAudioDigitalI2S;
 static bool mCaptureUseSram;
+static bool mCapturePrepare;
+
 static DEFINE_SPINLOCK(auddrv_ULInCtl_lock);
 
 /*
@@ -98,15 +102,14 @@ static void StopAudioCaptureHardware(struct snd_pcm_substream *substream)
 {
 	pr_warn("StopAudioCaptureHardware\n");
 
+	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_VUL, false);
+
 	/* here to set interrupt */
+	irq_remove_user(substream, Soc_Aud_IRQ_MCU_MODE_IRQ2_MCU_MODE);
 
 	SetMemoryPathEnable(Soc_Aud_Digital_Block_I2S_IN_ADC, false);
 	if (GetMemoryPathEnable(Soc_Aud_Digital_Block_I2S_IN_ADC) == false)
 		SetI2SAdcEnable(false);
-
-	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_VUL, false);
-
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ2_MCU_MODE, false);
 
 	/* here to turn off digital part */
 	SetConnection(Soc_Aud_InterCon_DisConnect, Soc_Aud_InterConnectionInput_I03, Soc_Aud_InterConnectionOutput_O09);
@@ -159,9 +162,10 @@ static void StartAudioCaptureHardware(struct snd_pcm_substream *substream)
 	}
 
 	/* here to set interrupt */
-	SetIrqMcuCounter(Soc_Aud_IRQ_MCU_MODE_IRQ2_MCU_MODE, substream->runtime->period_size);
-	SetIrqMcuSampleRate(Soc_Aud_IRQ_MCU_MODE_IRQ2_MCU_MODE, substream->runtime->rate);
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ2_MCU_MODE, true);
+	irq_add_user(substream,
+		     Soc_Aud_IRQ_MCU_MODE_IRQ2_MCU_MODE,
+		     substream->runtime->rate,
+		     substream->runtime->period_size);
 
 	SetSampleRate(Soc_Aud_Digital_Block_MEM_VUL, substream->runtime->rate);
 	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_VUL, true);
@@ -196,6 +200,10 @@ static void StartAudioCaptureHardware(struct snd_pcm_substream *substream)
 
 static int mtk_capture_pcm_prepare(struct snd_pcm_substream *substream)
 {
+	/*if (mCapturePrepare == false)
+		SetMemifSubStream(Soc_Aud_Digital_Block_MEM_VUL, substream);*/
+
+	mCapturePrepare = true;
 	return 0;
 }
 
@@ -413,6 +421,8 @@ static int mtk_capture_pcm_close(struct snd_pcm_substream *substream)
 	}
 	AudDrv_ADC_Clk_Off();
 	AudDrv_Clk_Off();
+	/*RemoveMemifSubStream(Soc_Aud_Digital_Block_MEM_VUL, substream);*/
+	mCapturePrepare = false;
 	return 0;
 }
 
@@ -700,6 +710,7 @@ static int mtk_asoc_capture_pcm_new(struct snd_soc_pcm_runtime *rtd)
 static int mtk_afe_capture_probe(struct snd_soc_platform *platform)
 {
 	pr_warn("mtk_afe_capture_probe\n");
+	mCapturePrepare = false;
 	AudDrv_Allocate_mem_Buffer(platform->dev, Soc_Aud_Digital_Block_MEM_VUL, UL1_MAX_BUFFER_SIZE);
 	Capture_dma_buf =  Get_Mem_Buffer(Soc_Aud_Digital_Block_MEM_VUL);
 	mAudioDigitalI2S =  kzalloc(sizeof(AudioDigtalI2S), GFP_KERNEL);

@@ -227,8 +227,8 @@ static ssize_t ramoops_pstore_read(u64 *id, enum pstore_type_id *type,
 	if (!prz_ok(prz)) {
 		prz = ramoops_get_next_prz(&cxt->bprz, &cxt->bconsole_read_cnt,
 					   1, id, type, PSTORE_TYPE_CONSOLE, 0);
-		pr_notice("pstore: pstore_read bprz type: %d count %d id %llx\n", *type, cxt->bconsole_read_cnt, *id);
-		*id = 2;
+		/*pr_notice("pstore: pstore_read bprz type: %d count %d id %llx\n", *type, cxt->bconsole_read_cnt, *id);
+		*id = 2;*/
 	}
 	if (!prz_ok(prz))
 		prz = ramoops_get_next_prz(&cxt->fprz, &cxt->ftrace_read_cnt,
@@ -527,7 +527,7 @@ static int ramoops_probe(struct platform_device *pdev)
 	cxt->dump_oops = pdata->dump_oops;
 	cxt->ecc_info = pdata->ecc_info;
 
-	pr_err("pstore:address is 0x%lx, size is 0x%lx, console_size is 0x%x, pmsg_size is 0x%x\n",
+	pr_err("pstore:address is 0x%lx, size is 0x%lx, console_size is 0x%zx, pmsg_size is 0x%zx\n",
 			(unsigned long)cxt->phys_addr, cxt->size, cxt->console_size, cxt->pmsg_size);
 	paddr = cxt->phys_addr;
 

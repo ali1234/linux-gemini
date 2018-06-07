@@ -29,6 +29,8 @@ enum {
 	AP_LOOPBACK_HEADSET_MIC_TO_HP,
 	AP_LOOPBACK_AMIC_TO_I2S0,
 	AP_LOOPBACK_HEADSET_MIC_TO_I2S0,
+	AP_LOOPBACK_EXTADC2_TO_SPK,
+	AP_LOOPBACK_EXTADC2_TO_HP,
 };
 
 enum {
@@ -49,6 +51,8 @@ enum {
 
 	AFE_SGEN_O0O1,
 	AFE_SGEN_O2,
+	AFE_SGEN_O3,
+	AFE_SGEN_O4,
 	AFE_SGEN_O3O4,
 	AFE_SGEN_O5O6,
 	AFE_SGEN_O7O8,
@@ -102,10 +106,29 @@ static int ap_loopback_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 
 			mt_afe_disable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC);
 			if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC) == false)
-				mt_afe_disable_i2s_adc();
+				mt_afe_disable_mtkif_adc();
 
+			/*single mic:I03-->O03 & O04*/
 			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I03, INTER_CONN_O00);
-			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I04, INTER_CONN_O01);
+			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I03, INTER_CONN_O01);
+		} else if (priv->ap_loopback_type ==  AP_LOOPBACK_EXTADC2_TO_SPK ||
+			priv->ap_loopback_type ==  AP_LOOPBACK_EXTADC2_TO_HP) {
+			mt_afe_disable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC);
+			if (!mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC))
+				mt_afe_disable_i2s_dac();
+
+			mt_afe_disable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC2);
+			if (!mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC2))
+				mt_afe_disable_i2s_adc2();
+
+			/*single mic:I17-->O03 & O04*/
+			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I17, INTER_CONN_O03);
+			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I17, INTER_CONN_O04);
+
+			mt_afe_disable_apll_div_power(MT_AFE_I2S2, sample_rate);
+			mt_afe_disable_apll_div_power(MT_AFE_ENGEN, sample_rate);
+			mt_afe_disable_apll_tuner(sample_rate);
+			mt_afe_disable_apll(sample_rate);
 		} else {
 			mt_afe_disable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC);
 			if (!mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC))
@@ -113,7 +136,7 @@ static int ap_loopback_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 
 			mt_afe_disable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC);
 			if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC) == false)
-				mt_afe_disable_i2s_adc();
+				mt_afe_disable_mtkif_adc();
 
 			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I03, INTER_CONN_O03);
 			mt_afe_set_connection(INTER_DISCONNECT, INTER_CONN_I03, INTER_CONN_O04);
@@ -140,17 +163,18 @@ static int ap_loopback_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 		mt_afe_dac_clk_on();
 		mt_afe_adc_clk_on();
 
+		/*single mic:I03-->O03 & O04*/
 		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I03, INTER_CONN_O03);
-		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I04, INTER_CONN_O04);
+		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I03, INTER_CONN_O04);
 
 		mt_afe_set_out_conn_format(MT_AFE_CONN_OUTPUT_16BIT, INTER_CONN_O03);
 		mt_afe_set_out_conn_format(MT_AFE_CONN_OUTPUT_16BIT, INTER_CONN_O04);
 
 		/* configure uplink */
-		mt_afe_set_i2s_adc_in(sample_rate);
+		mt_afe_set_mtkif_adc_in(sample_rate);
 		if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC) == false) {
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC);
-			mt_afe_enable_i2s_adc();
+			mt_afe_enable_mtkif_adc();
 		} else {
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC);
 		}
@@ -158,7 +182,8 @@ static int ap_loopback_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 		/* configure downlink */
 		if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC) == false) {
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC);
-			mt_afe_set_i2s_dac_out(sample_rate);
+			mt_afe_set_i2s_dac_out(sample_rate, MT_AFE_NORMAL_CLOCK,
+					MT_AFE_I2S_WLEN_16BITS);
 			mt_afe_enable_i2s_dac();
 		} else {
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC);
@@ -172,16 +197,16 @@ static int ap_loopback_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 		mt_afe_adc_clk_on();
 
 		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I03, INTER_CONN_O00);
-		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I04, INTER_CONN_O01);
+		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I03, INTER_CONN_O01);
 
 		mt_afe_set_out_conn_format(MT_AFE_CONN_OUTPUT_16BIT, INTER_CONN_O00);
 		mt_afe_set_out_conn_format(MT_AFE_CONN_OUTPUT_16BIT, INTER_CONN_O01);
 
 		/* configure uplink */
-		mt_afe_set_i2s_adc_in(sample_rate);
+		mt_afe_set_mtkif_adc_in(sample_rate);
 		if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC) == false) {
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC);
-			mt_afe_enable_i2s_adc();
+			mt_afe_enable_mtkif_adc();
 		} else {
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC);
 		}
@@ -213,15 +238,54 @@ static int ap_loopback_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_2);
 		}
 
-		mt_afe_set_2nd_i2s_out(sample_rate, MT_AFE_NORMAL_CLOCK);
+		mt_afe_set_2nd_i2s_out(sample_rate, MT_AFE_NORMAL_CLOCK, MT_AFE_I2S_WLEN_16BITS);
 		mt_afe_enable_2nd_i2s_out();
 
 		/* i2s0 soft reset end */
 		udelay(1);
 		mt_afe_set_reg(AUDIO_TOP_CON1, 0x0, 0x2);
 		mt_afe_enable_afe(true);
-	}
+	} else if (set_value == AP_LOOPBACK_EXTADC2_TO_SPK ||
+			set_value == AP_LOOPBACK_EXTADC2_TO_HP) {
+		mt_afe_main_clk_on();
+		mt_afe_dac_clk_on();
+		mt_afe_adc_clk_on();
 
+		/*single mic:I17-->O03 & O04*/
+		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I17, INTER_CONN_O03);
+		mt_afe_set_connection(INTER_CONNECT, INTER_CONN_I17, INTER_CONN_O04);
+
+		mt_afe_set_out_conn_format(MT_AFE_CONN_OUTPUT_16BIT, INTER_CONN_O03);
+		mt_afe_set_out_conn_format(MT_AFE_CONN_OUTPUT_16BIT, INTER_CONN_O04);
+
+		/* configure uplink */
+		mt_afe_enable_apll(sample_rate);
+		mt_afe_enable_apll_tuner(sample_rate);
+		mt_afe_set_mclk(MT_AFE_I2S2, sample_rate);
+		mt_afe_set_mclk(MT_AFE_ENGEN, sample_rate);
+		mt_afe_enable_apll_div_power(MT_AFE_I2S2, sample_rate);
+		mt_afe_enable_apll_div_power(MT_AFE_ENGEN, sample_rate);
+
+		mt_afe_set_i2s_adc2_in(sample_rate, MT_AFE_LOW_JITTER_CLOCK);
+		if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC2) == false) {
+			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC2);
+			mt_afe_enable_i2s_adc2();
+		} else {
+			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_IN_ADC2);
+		}
+
+		/* configure downlink */
+		if (mt_afe_get_memory_path_state(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC) == false) {
+			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC);
+			mt_afe_set_i2s_dac_out(sample_rate, MT_AFE_NORMAL_CLOCK,
+					MT_AFE_I2S_WLEN_16BITS);
+			mt_afe_enable_i2s_dac();
+		} else {
+			mt_afe_enable_memory_path(MT_AFE_DIGITAL_BLOCK_I2S_OUT_DAC);
+		}
+
+		mt_afe_enable_afe(true);
+	}
 	priv->ap_loopback_type = ucontrol->value.integer.value[0];
 
 	return 0;
@@ -289,6 +353,12 @@ static int afe_sinegen_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 	case AFE_SGEN_O2:
 		mt_afe_enable_sinegen_hw(INTER_CONN_O02, MT_AFE_MEMIF_DIRECTION_OUTPUT);
 		break;
+	case AFE_SGEN_O3:
+		mt_afe_set_reg(AFE_SGEN_CON0, 0x2e8c28c2, 0xffffffff);
+		break;
+	case AFE_SGEN_O4:
+		mt_afe_set_reg(AFE_SGEN_CON0, 0x2d8c28c2, 0xffffffff);
+		break;
 	case AFE_SGEN_O3O4:
 		mt_afe_enable_sinegen_hw(INTER_CONN_O03, MT_AFE_MEMIF_DIRECTION_OUTPUT);
 		break;
@@ -345,6 +415,8 @@ static const char *const ap_loopback_function[] = {
 	ENUM_TO_STR(AP_LOOPBACK_HEADSET_MIC_TO_HP),
 	ENUM_TO_STR(AP_LOOPBACK_AMIC_TO_I2S0),
 	ENUM_TO_STR(AP_LOOPBACK_HEADSET_MIC_TO_I2S0),
+	ENUM_TO_STR(AP_LOOPBACK_EXTADC2_TO_SPK),
+	ENUM_TO_STR(AP_LOOPBACK_EXTADC2_TO_HP),
 };
 
 static const char *const afe_sgen_function[] = {
@@ -364,6 +436,8 @@ static const char *const afe_sgen_function[] = {
 	ENUM_TO_STR(AFE_SGEN_I21I22),
 	ENUM_TO_STR(AFE_SGEN_O0O1),
 	ENUM_TO_STR(AFE_SGEN_O2),
+	ENUM_TO_STR(AFE_SGEN_O3),
+	ENUM_TO_STR(AFE_SGEN_O4),
 	ENUM_TO_STR(AFE_SGEN_O3O4),
 	ENUM_TO_STR(AFE_SGEN_O5O6),
 	ENUM_TO_STR(AFE_SGEN_O7O8),

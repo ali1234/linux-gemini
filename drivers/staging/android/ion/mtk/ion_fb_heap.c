@@ -78,9 +78,9 @@ static int ion_fb_heap_phys(struct ion_heap *heap, struct ion_buffer *buffer,
 		IONMSG("[ion_fb_heap_phys]: Error. Buffer not configured.\n");
 		return -EFAULT; /* Buffer not configured. */
 	}
-	IONMSG("[ion_fb_heap_phys]: eModuleID = %d, len = 0x%x, pa = 0x%lx.\n",
+	/*IONMSG("[ion_fb_heap_phys]: eModuleID = %d, len = 0x%x, pa = 0x%lx.\n",
 			pBufferInfo->eModuleID, (unsigned int) buffer->size,
-			pBufferInfo->priv_phys);
+			pBufferInfo->priv_phys);*/
 
 	/*Allocate MVA*/
 	mutex_lock(&(pBufferInfo->lock));
@@ -99,7 +99,7 @@ static int ion_fb_heap_phys(struct ion_heap *heap, struct ion_buffer *buffer,
 	mutex_unlock(&(pBufferInfo->lock));
 	*len = buffer->size;
 
-	IONMSG("[ion_fb_heap_phys]: MVA = 0x%x, len = 0x%x.\n", pBufferInfo->MVA, (unsigned int) buffer->size);
+	/*IONMSG("[ion_fb_heap_phys]: MVA = 0x%x, len = 0x%x.\n", pBufferInfo->MVA, (unsigned int) buffer->size);*/
 
 	return 0;
 }
@@ -135,7 +135,7 @@ static int ion_fb_heap_allocate(struct ion_heap *heap,
 
 	buffer->priv_virt = pBufferInfo;
 
-	IONMSG("[ion_fb_heap_allocate] Success! buffer->priv_phys = %lx\n", pBufferInfo->priv_phys);
+	/*IONMSG("[ion_fb_heap_allocate] Success! buffer->priv_phys = %lx\n", pBufferInfo->priv_phys);*/
 	return pBufferInfo->priv_phys == ION_CARVEOUT_ALLOCATE_FAIL ? -ENOMEM : 0;
 }
 
@@ -267,6 +267,8 @@ int ion_drv_create_FB_heap(ion_phys_addr_t fb_base, size_t fb_size)
 	struct ion_platform_heap *heap_data;
 
 	heap_data = kzalloc(sizeof(struct ion_platform_heap), GFP_KERNEL);
+	if (!heap_data)
+		return -ENOMEM;
 
 	heap_data->id = ION_HEAP_TYPE_FB;
 	heap_data->type = ION_HEAP_TYPE_FB;
@@ -276,6 +278,8 @@ int ion_drv_create_FB_heap(ion_phys_addr_t fb_base, size_t fb_size)
 	heap_data->align = 0x1000;
 	heap_data->priv = NULL;
 	ion_drv_create_heap(heap_data);
+
+	kfree(heap_data);
 
 	return 0;
 }

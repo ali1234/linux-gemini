@@ -180,7 +180,7 @@ retry:
 			 * enabled. A corresponding message will be printed
 			 * later, when it is has been scrubbed.
 			 */
-			ubi_msg("fixable bit-flip detected at PEB %d", pnum);
+			dbg_io("fixable bit-flip detected at PEB %d", pnum);
 			ubi_assert(len == read);
 			return UBI_IO_BITFLIPS;
 		}
@@ -356,6 +356,11 @@ retry:
 	ei.priv     = (unsigned long)&wq;
 
 	err = mtd_erase(ubi->mtd, &ei);
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	if (ubi_peb_istlc(ubi, pnum))
+		atomic_inc(&ubi->tlc_ec_count);
+	else
+#endif
 	atomic_inc(&ubi->ec_count); /*MTK*/
 	if (err) {
 		if (retries++ < UBI_IO_RETRIES) {
@@ -415,7 +420,7 @@ static int torture_peb(struct ubi_device *ubi, int pnum)
 {
 	int err, i, patt_count;
 
-	ubi_msg("run torture test for PEB %d", pnum);
+	dbg_io("run torture test for PEB %d", pnum);
 	patt_count = ARRAY_SIZE(patterns);
 	ubi_assert(patt_count > 0);
 
@@ -464,7 +469,7 @@ static int torture_peb(struct ubi_device *ubi, int pnum)
 	}
 
 	err = patt_count;
-	ubi_msg("PEB %d passed torture test, do not mark it as bad", pnum);
+	dbg_io("PEB %d passed torture test, do not mark it as bad", pnum);
 
 out:
 #ifdef CONFIG_UBI_SHARE_BUFFER
@@ -922,7 +927,7 @@ static int validate_vid_hdr(const struct ubi_device *ubi,
 	if (vol_id >= UBI_INTERNAL_VOL_START && compat != UBI_COMPAT_DELETE &&
 	    compat != UBI_COMPAT_RO && compat != UBI_COMPAT_PRESERVE &&
 	    compat != UBI_COMPAT_REJECT) {
-#ifndef CONFIG_BLB
+#ifndef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 		ubi_err("bad compat");
 		goto bad;
 #else
@@ -940,6 +945,11 @@ static int validate_vid_hdr(const struct ubi_device *ubi,
 
 	if (data_pad >= ubi->leb_size / 2) {
 		ubi_err("bad data_pad");
+		goto bad;
+	}
+
+	if (data_size > ubi->leb_size) {
+		ubi_err("bad data_size");
 		goto bad;
 	}
 
@@ -1126,7 +1136,7 @@ int ubi_io_write_vid_hdr(struct ubi_device *ubi, int pnum,
 	if (err)
 		return err;
 
-#ifdef CONFIG_BLB
+#ifdef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 	{
 		int vol_id =  be32_to_cpu(vid_hdr->vol_id);
 
@@ -1143,7 +1153,7 @@ int ubi_io_write_vid_hdr(struct ubi_device *ubi, int pnum,
 	return err;
 }
 
-#ifdef CONFIG_BLB
+#ifdef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 int ubi_io_write_vid_hdr_blb(struct ubi_device *ubi, int pnum,
 			 struct ubi_vid_hdr *vid_hdr)
 {
@@ -1422,13 +1432,13 @@ static int self_check_write(struct ubi_device *ubi, const void *buf, int pnum,
 
 		ubi_err("self-check failed for PEB %d:%d, len %d",
 			pnum, offset, len);
-		ubi_msg("data differ at position %d", i);
+		dbg_io("data differ at position %d", i);
 		dump_len = max_t(int, 128, len - i);
-		ubi_msg("hex dump of the original buffer from %d to %d",
+		dbg_io("hex dump of the original buffer from %d to %d",
 			i, i + dump_len);
 		print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 32, 1,
 			       buf + i, dump_len, 1);
-		ubi_msg("hex dump of the read buffer from %d to %d",
+		dbg_io("hex dump of the read buffer from %d to %d",
 			i, i + dump_len);
 		print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 32, 1,
 			       buf1 + i, dump_len, 1);
@@ -1491,7 +1501,7 @@ int ubi_self_check_all_ff(struct ubi_device *ubi, int pnum, int offset, int len)
 
 fail:
 	ubi_err("self-check failed for PEB %d", pnum);
-	ubi_msg("hex dump of the %d-%d region", offset, offset + len);
+	dbg_io("hex dump of the %d-%d region", offset, offset + len);
 	print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 32, 1, buf, len, 1);
 	err = -EINVAL;
 error:
@@ -1500,7 +1510,7 @@ error:
 	return err;
 }
 
-#ifdef CONFIG_BLB
+#ifdef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 /* Read one page with oob one time */
 int ubi_io_read_oob(const struct ubi_device *ubi, void *databuf, void *oobbuf,
 		int pnum, int offset) {
@@ -1534,7 +1544,7 @@ int ubi_io_read_oob(const struct ubi_device *ubi, void *databuf, void *oobbuf,
 			 * enabled. A corresponding message will be printed
 			 * later, when it is has been scrubbed.
 			 */
-			ubi_msg("fixable bit-flip detected at addr %lld", addr);
+			dbg_io("fixable bit-flip detected at addr %lld", addr);
 			if (oobbuf)
 				ubi_assert(ops.oobretlen == ops.ooblen);
 			return UBI_IO_BITFLIPS;
@@ -1544,7 +1554,7 @@ int ubi_io_read_oob(const struct ubi_device *ubi, void *databuf, void *oobbuf,
 			dump_stack();
 			err = -EIO;
 		}
-		ubi_msg("mtd_read_oob err %d\n", err);
+		dbg_io("mtd_read_oob err %d\n", err);
 	}
 
 	return err;
@@ -1583,4 +1593,34 @@ int ubi_io_write_oob(const struct ubi_device *ubi, void *databuf, void *oobbuf,
 
 	return err;
 }
+#endif
+
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+int ubi_io_fill_ec_hdr(struct ubi_device *ubi, int pnum, struct ubi_ec_hdr *ec_hdr, int ec)
+{
+	uint32_t crc;
+
+	ec_hdr->magic = cpu_to_be32(UBI_EC_HDR_MAGIC);
+	ec_hdr->version = UBI_VERSION;
+	ec_hdr->ec = cpu_to_be64((unsigned long long)ec);
+	ec_hdr->vid_hdr_offset = cpu_to_be32(ubi->vid_hdr_offset);
+	ec_hdr->data_offset = cpu_to_be32(ubi->leb_start);
+	ec_hdr->image_seq = cpu_to_be32(ubi->image_seq);
+	crc = crc32(UBI_CRC32_INIT, ec_hdr, UBI_EC_HDR_SIZE_CRC);
+	ec_hdr->hdr_crc = cpu_to_be32(crc);
+	return self_check_ec_hdr(ubi, pnum, ec_hdr);
+}
+
+int ubi_io_fill_vid_hdr(struct ubi_device *ubi, int pnum, struct ubi_vid_hdr *vid_hdr)
+{
+	uint32_t crc;
+
+	vid_hdr->magic = cpu_to_be32(UBI_VID_HDR_MAGIC);
+	vid_hdr->version = UBI_VERSION;
+	vid_hdr->sqnum = cpu_to_be64(ubi_next_sqnum(ubi));
+	crc = crc32(UBI_CRC32_INIT, vid_hdr, UBI_VID_HDR_SIZE_CRC);
+	vid_hdr->hdr_crc = cpu_to_be32(crc);
+	return self_check_vid_hdr(ubi, pnum, vid_hdr);
+}
+
 #endif

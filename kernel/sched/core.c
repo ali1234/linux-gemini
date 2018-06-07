@@ -845,6 +845,29 @@ static void set_load_weight(struct task_struct *p)
 }
 
 #ifdef CONFIG_MTK_SCHED_CMP_TGS
+#ifdef CONFIG_MT_SCHED_TRACE_DETAIL
+static void tgs_log(struct rq *rq, struct task_struct *p)
+{
+	struct task_struct *tg = p->group_leader;
+	int i, num_cluster;
+
+	if (group_leader_is_empty(p))
+		return;
+
+	num_cluster = arch_get_nr_clusters();
+
+	mt_sched_printf(sched_cmp, "%d:%s %d:%s ", tg->pid, tg->comm, p->pid, p->comm);
+
+	for (i = 0; i < num_cluster; i++) {
+		mt_sched_printf(sched_cmp, "cluster %d: %lu %lu %lu ",
+			i,
+			tg->thread_group_info[i].nr_running,
+			tg->thread_group_info[i].cfs_nr_running,
+			tg->thread_group_info[i].loadwop_avg_contrib);
+	}
+}
+#endif /* CONFIG_MT_SCHED_TRACE_DETAIL */
+
 static void sched_tg_enqueue(struct rq *rq, struct task_struct *p)
 {
 	int id;
@@ -861,7 +884,7 @@ static void sched_tg_enqueue(struct rq *rq, struct task_struct *p)
 	tg->thread_group_info[id].nr_running++;
 	raw_spin_unlock_irqrestore(&tg->thread_group_info_lock, flags);
 
-#ifdef CONFIG_MT_SCHED_INFO
+#ifdef CONFIG_MT_SCHED_TRACE_DETAIL
 	tgs_log(rq, p);
 #endif
 }
@@ -883,37 +906,11 @@ static void sched_tg_dequeue(struct rq *rq, struct task_struct *p)
 	tg->thread_group_info[id].nr_running--;
 	raw_spin_unlock_irqrestore(&tg->thread_group_info_lock, flags);
 
-#ifdef CONFIG_MT_SCHED_INFO
+#ifdef CONFIG_MT_SCHED_TRACE_DETAIL
 	tgs_log(rq, p);
 #endif
 }
-
-#endif
-
-#ifdef CONFIG_MTK_SCHED_CMP_TGS
-#ifdef CONFIG_MT_SCHED_INFO
-static void tgs_log(struct rq *rq, struct task_struct *p)
-{
-	struct task_struct *tg = p->group_leader;
-	int i, num_cluster;
-
-	if (group_leader_is_empty(p))
-		return;
-
-	num_cluster = arch_get_nr_cluster();
-
-	mt_sched_printf("%d:%s %d:%s ", tg->pid, tg->comm, p->pid, p->comm);
-
-	for (i = 0; i < num_cluster; i++) {
-		mt_sched_printf("cluster %d: %lu %lu %lu ",
-			i,
-			tg->thread_group_info[0].nr_running,
-			tg->thread_group_info[0].cfs_nr_running,
-			tg->thread_group_info[0].load_avg_ratio);
-	}
-}
-#endif
-#endif
+#endif /* CONFIG_MTK_SCHED_CMP_TGS */
 
 static void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 {
@@ -1248,6 +1245,8 @@ int migrate_swap(struct task_struct *cur, struct task_struct *p)
 	struct migration_swap_arg arg;
 	int ret = -EINVAL;
 
+	get_online_cpus();
+
 	arg = (struct migration_swap_arg){
 		.src_task = cur,
 		.src_cpu = task_cpu(cur),
@@ -1258,10 +1257,6 @@ int migrate_swap(struct task_struct *cur, struct task_struct *p)
 	if (arg.src_cpu == arg.dst_cpu)
 		goto out;
 
-	/*
-	 * These three tests are all lockless; this is OK since all of them
-	 * will be re-checked with proper locks held further down the line.
-	 */
 	if (!cpu_active(arg.src_cpu) || !cpu_active(arg.dst_cpu))
 		goto out;
 
@@ -1275,6 +1270,7 @@ int migrate_swap(struct task_struct *cur, struct task_struct *p)
 	ret = stop_two_cpus(arg.dst_cpu, arg.src_cpu, migrate_swap_stop, &arg);
 
 out:
+	put_online_cpus();
 	return ret;
 }
 
@@ -2367,11 +2363,11 @@ static void finish_task_switch(struct rq *rq, struct task_struct *prev)
 	 * If a task dies, then it sets TASK_DEAD in tsk->state and calls
 	 * schedule one last time. The schedule call will never return, and
 	 * the scheduled task must drop that reference.
-	 * The test for TASK_DEAD must occur while the runqueue locks are
-	 * still held, otherwise prev could be scheduled on another cpu, die
-	 * there before we look at prev->state, and then the reference would
-	 * be dropped twice.
-	 *		Manfred Spraul <manfred@colorfullife.com>
+	 *
+	 * We must observe prev->state before clearing prev->on_cpu (in
+	 * finish_lock_switch), otherwise a concurrent wakeup can get prev
+	 * running on another CPU and we could rave with its RUNNING -> DEAD
+	 * transition, resulting in a double drop.
 	 */
 	prev_state = prev->state;
 	vtime_task_switch(prev);
@@ -2515,13 +2511,20 @@ unsigned long nr_running(void)
 
 /*
  * Check if only the current task is running on the cpu.
+ *
+ * Caution: this function does not check that the caller has disabled
+ * preemption, thus the result might have a time-of-check-to-time-of-use
+ * race.  The caller is responsible to use it correctly, for example:
+ *
+ * - from a non-preemptable section (of course)
+ *
+ * - from a thread that is bound to a single CPU
+ *
+ * - in a loop with very short iterations (e.g. a polling loop)
  */
 bool single_task_running(void)
 {
-	if (cpu_rq(smp_processor_id())->nr_running == 1)
-		return true;
-	else
-		return false;
+	return raw_rq()->nr_running == 1;
 }
 EXPORT_SYMBOL(single_task_running);
 
@@ -2804,6 +2807,14 @@ void preempt_count_add(int val)
 		MT_trace_preempt_off();
 #endif
 	}
+
+#ifdef CONFIG_DEBUG_PREEMPT
+	if (DEBUG_LOCKS_WARN_ON((preempt_count() < 0))) {
+		printk_deferred("[name:core&]%s, val=0x%x, preempt_count=0x%x\n",
+			__func__, val, preempt_count());
+	}
+#endif
+
 }
 EXPORT_SYMBOL(preempt_count_add);
 NOKPROBE_SYMBOL(preempt_count_add);
@@ -2838,6 +2849,14 @@ void preempt_count_sub(int val)
 #ifdef CONFIG_MTPROF
 	MT_trace_check_preempt_dur();
 #endif
+
+#ifdef CONFIG_DEBUG_PREEMPT
+	if (DEBUG_LOCKS_WARN_ON((preempt_count() < 0))) {
+		printk_deferred("[name:core&]%s, val=0x%x, preempt_count=0x%x\n",
+			__func__, val, preempt_count());
+	}
+#endif
+
 }
 EXPORT_SYMBOL(preempt_count_sub);
 NOKPROBE_SYMBOL(preempt_count_sub);
@@ -3863,9 +3882,7 @@ change:
 
 	prev_class = p->sched_class;
 	__setscheduler(rq, p, attr, true);
-#ifdef CONFIG_MTPROF
-	check_mt_rt_mon_info(p);
-#endif
+
 	if (running)
 		p->sched_class->set_curr_task(rq);
 	if (queued) {
@@ -4263,11 +4280,13 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	struct task_struct *p;
 	int retval;
 
+	get_online_cpus();
 	rcu_read_lock();
 
 	p = find_process_by_pid(pid);
 	if (!p) {
 		rcu_read_unlock();
+		put_online_cpus();
 		pr_debug("SCHED: setaffinity find process %d fail\n", pid);
 		return -ESRCH;
 	}
@@ -4351,6 +4370,7 @@ out_free_cpus_allowed:
 	free_cpumask_var(cpus_allowed);
 out_put_task:
 	put_task_struct(p);
+	put_online_cpus();
 	if (retval)
 		pr_debug("SCHED: setaffinity status %d\n", retval);
 #ifdef CONFIG_MT_SCHED_INTEROP
@@ -4403,6 +4423,7 @@ long sched_getaffinity(pid_t pid, struct cpumask *mask)
 	unsigned long flags;
 	int retval;
 
+	get_online_cpus();
 	rcu_read_lock();
 
 	retval = -ESRCH;
@@ -4419,11 +4440,12 @@ long sched_getaffinity(pid_t pid, struct cpumask *mask)
 	}
 
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
-	cpumask_and(mask, &p->cpus_allowed, cpu_active_mask);
+	cpumask_and(mask, &p->cpus_allowed, cpu_online_mask);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 
 out_unlock:
 	rcu_read_unlock();
+	put_online_cpus();
 
 	if (retval)
 		pr_debug("SCHED: getaffinity status %d\n", retval);
@@ -4848,13 +4870,15 @@ void show_state_filter(unsigned long state_filter)
 		/*
 		 * reset the NMI-timeout, listing all files on a slow
 		 * console might take a lot of time:
+		 * Also, reset softlockup watchdogs on all CPUs, because
+		 * another CPU might be blocked waiting for us to process
+		 * an IPI.
 		 */
 		touch_nmi_watchdog();
+		touch_all_softlockup_watchdogs();
 		if (!state_filter || (p->state & state_filter))
 			sched_show_task(p);
 	}
-
-	touch_all_softlockup_watchdogs();
 
 #ifdef CONFIG_SCHED_DEBUG
 	sysrq_sched_debug_show();
@@ -5001,8 +5025,6 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 
 	if (!cpumask_intersects(new_mask, cpu_active_mask)) {
 		ret = -EINVAL;
-		printk_deferred("SCHED: intersects new_mask: %lu, cpu_active_mask: %lu\n",
-			new_mask->bits[0], cpu_active_mask->bits[0]);
 		goto out;
 	}
 
@@ -5013,6 +5035,11 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 		goto out;
 
 	dest_cpu = cpumask_any_and(cpu_active_mask, new_mask);
+	/* sched: if cpu_active_mask and new_mask have no intesects */
+	if (dest_cpu == nr_cpu_ids) {
+		ret = -EINVAL;
+		goto out;
+	}
 	if (task_running(rq, p) || p->state == TASK_WAKING) {
 		struct migration_arg arg = { p, dest_cpu };
 		/* Need help from migration thread: drop lock and wait. */
@@ -5227,6 +5254,7 @@ static void migrate_tasks(unsigned int dead_cpu)
 	 * value of rq->clock[_task]
 	 */
 	update_rq_clock(rq);
+	unthrottle_offline_rt_rqs(rq);
 
 	for ( ; ; ) {
 		/*
@@ -5539,6 +5567,14 @@ static int sched_cpu_active(struct notifier_block *nfb,
 	case CPU_STARTING:
 		set_cpu_rq_start_time();
 		return NOTIFY_OK;
+	case CPU_ONLINE:
+		/*
+		 * At this point a starting CPU has marked itself as online via
+		 * set_cpu_online(). But it might not yet have marked itself
+		 * as active, which is essential from here on.
+		 *
+		 * Thus, fall-through and help the starting CPU along.
+		 */
 	case CPU_DOWN_FAILED:
 		set_cpu_active((long)hcpu, true);
 		return NOTIFY_OK;
@@ -6676,7 +6712,7 @@ static void sched_init_numa(void)
 
 			sched_domains_numa_masks[i][j] = mask;
 
-			for (k = 0; k < nr_node_ids; k++) {
+			for_each_node(k) {
 				if (node_distance(j, k) > sched_domains_numa_distance[i])
 					continue;
 
@@ -7225,17 +7261,14 @@ void __init sched_init_smp(void)
 
 	sched_init_numa();
 
-	/*
-	 * There's no userspace yet to cause hotplug operations; hence all the
-	 * cpu masks are stable and all blatant races in the below code cannot
-	 * happen.
-	 */
+	get_online_cpus();
 	mutex_lock(&sched_domains_mutex);
 	init_sched_domains(cpu_active_mask);
 	cpumask_andnot(non_isolated_cpus, cpu_possible_mask, cpu_isolated_map);
 	if (cpumask_empty(non_isolated_cpus))
 		cpumask_set_cpu(smp_processor_id(), non_isolated_cpus);
 	mutex_unlock(&sched_domains_mutex);
+	put_online_cpus();
 
 	hotcpu_notifier(sched_domains_numa_masks_update, CPU_PRI_SCHED_ACTIVE);
 	hotcpu_notifier(cpuset_cpu_active, CPU_PRI_CPUSET_ACTIVE);

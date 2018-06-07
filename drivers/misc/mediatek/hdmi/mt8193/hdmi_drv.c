@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*----------------------------------------------------------------------------*/
 #ifdef HDMI_MT8193_SUPPORT
 
@@ -14,10 +27,6 @@
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #endif
-#if defined(CONFIG_PM_AUTOSLEEP)
-#include <linux/fb.h>
-#include <linux/notifier.h>
-#endif
 #include <linux/platform_device.h>
 #include <asm/atomic.h>
 #include <linux/init.h>
@@ -29,7 +38,6 @@
 #include <linux/byteorder/generic.h>
 #include <linux/interrupt.h>
 #include <linux/time.h>
-#include <linux/rtpm_prio.h>
 #include <linux/dma-mapping.h>
 #include <linux/syscalls.h>
 #include <linux/reboot.h>
@@ -43,6 +51,7 @@
 #include <linux/of_address.h>
 #include <linux/clk.h>
 #include <linux/of_gpio.h>
+#include <linux/gpio.h>
 #include <linux/uaccess.h>
 #include <linux/types.h>
 #include <mt-plat/mt_gpio.h>
@@ -92,7 +101,7 @@ HDMI_CTRL_STATE_T e_hdmi_ctrl_state = HDMI_STATE_IDLE;
 HDCP_CTRL_STATE_T e_hdcp_ctrl_state = HDCP_RECEIVER_NOT_READY;
 unsigned int mt8193_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)  || defined(CONFIG_PM_AUTOSLEEP)
+#if defined(CONFIG_HAS_EARLYSUSPEND)
 size_t mt8193_hdmiearlysuspend = 1;
 #endif
 
@@ -164,34 +173,92 @@ static void mt8193_set_util_funcs(const struct HDMI_UTIL_FUNCS *util)
 
 static void mt8193_get_params(struct HDMI_PARAMS *params)
 {
+	enum HDMI_VIDEO_RESOLUTION input_resolution;
+
+	input_resolution = params->init_config.vformat;
 	memset(params, 0, sizeof(struct HDMI_PARAMS));
 
-	MT8193_DRV_LOG("720p\n");
-	params->init_config.vformat = HDMI_VIDEO_1280x720p_50Hz;
-	params->init_config.aformat = HDMI_AUDIO_48K_2CH;
+	switch (input_resolution) {
+	case HDMI_VIDEO_720x480p_60Hz:
+		params->clk_pol = HDMI_POLARITY_FALLING;
+		params->de_pol = HDMI_POLARITY_RISING;
+		params->hsync_pol = HDMI_POLARITY_RISING;
+		params->vsync_pol = HDMI_POLARITY_RISING;
+		params->hsync_pulse_width = 62;
+		params->hsync_back_porch  = 60;
+		params->hsync_front_porch = 16;
+		params->vsync_pulse_width = 6;
+		params->vsync_back_porch  = 30;
+		params->vsync_front_porch = 9;
+		params->width = 720;
+		params->height = 480;
+		params->input_clock = 27027;
+		params->init_config.vformat = HDMI_VIDEO_720x480p_60Hz;
+		break;
+	case HDMI_VIDEO_1280x720p_60Hz:
+		params->clk_pol = HDMI_POLARITY_FALLING;
+		params->de_pol = HDMI_POLARITY_RISING;
+		params->hsync_pol = HDMI_POLARITY_FALLING;
+		params->vsync_pol = HDMI_POLARITY_FALLING;
+		params->hsync_pulse_width = 40;
+		params->hsync_back_porch  = 220;
+		params->hsync_front_porch = 110;
+		params->vsync_pulse_width = 5;
+		params->vsync_back_porch  = 20;
+		params->vsync_front_porch = 5;
+		params->width = 1280;
+		params->height = 720;
+		params->input_clock = 74250;
+		params->init_config.vformat = HDMI_VIDEO_1280x720p_60Hz;
+		break;
+	case HDMI_VIDEO_1920x1080p_30Hz:
+		params->clk_pol = HDMI_POLARITY_FALLING;
+		params->de_pol = HDMI_POLARITY_RISING;
+		params->hsync_pol = HDMI_POLARITY_FALLING;
+		params->vsync_pol = HDMI_POLARITY_FALLING;
+		params->hsync_pulse_width = 44;
+		params->hsync_back_porch  = 148;
+		params->hsync_front_porch = 88;
+		params->vsync_pulse_width = 5;
+		params->vsync_back_porch  = 36;
+		params->vsync_front_porch = 4;
+		params->width = 1920;
+		params->height = 1080;
+		params->input_clock = 74250;
+		params->init_config.vformat = HDMI_VIDEO_1920x1080p_30Hz;
+		break;
+	case HDMI_VIDEO_1920x1080p_60Hz:
+		params->clk_pol = HDMI_POLARITY_FALLING;
+		params->de_pol = HDMI_POLARITY_RISING;
+		params->hsync_pol = HDMI_POLARITY_FALLING;
+		params->vsync_pol = HDMI_POLARITY_FALLING;
+		params->hsync_pulse_width = 44;
+		params->hsync_back_porch  = 148;
+		params->hsync_front_porch = 88;
+		params->vsync_pulse_width = 5;
+		params->vsync_back_porch  = 36;
+		params->vsync_front_porch = 4;
+		params->width = 1920;
+		params->height = 1080;
+		params->input_clock = 148500;
+		params->init_config.vformat = HDMI_VIDEO_1920x1080p_60Hz;
+		break;
+	default:
+		HDMI_DEF_LOG("Unknown support resolution\n");
+		break;
+	}
 
-	params->clk_pol = HDMI_POLARITY_FALLING;
-	params->de_pol = HDMI_POLARITY_RISING;
-	params->vsync_pol = HDMI_POLARITY_FALLING;
-	params->hsync_pol = HDMI_POLARITY_FALLING;
-
-	params->hsync_pulse_width = 40;
-	params->hsync_back_porch = 220;
-	params->hsync_front_porch = 440;
-	params->vsync_pulse_width = 5;
-	params->vsync_back_porch = 20;
-	params->vsync_front_porch = 5;
-
+	params->init_config.aformat = HDMI_AUDIO_44K_2CH;
 	params->rgb_order = HDMI_COLOR_ORDER_RGB;
-
 	params->io_driving_current = IO_DRIVING_CURRENT_2MA;
 	params->intermediat_buffer_num = 4;
-	params->output_mode = HDMI_OUTPUT_MODE_LCD_MIRROR;
-	params->is_force_awake = 1;
-	params->is_force_landscape = 1;
-
 	params->scaling_factor = 0;
+	params->cabletype = 0;
+	params->HDCPSupported = 0;
+	params->is_force_awake = 1;
+
 }
+
 
 static int mt8193_enter(void)
 {
@@ -227,7 +294,7 @@ static void mt8193_resume(void)
 /*----------------------------------------------------------------------------*/
 
 static int mt8193_video_config(enum HDMI_VIDEO_RESOLUTION vformat, enum HDMI_VIDEO_INPUT_FORMAT vin,
-			       enum HDMI_VIDEO_OUTPUT_FORMAT vout)
+			       int vout)
 {
 	HDMI_DEF_LOG("[hdmi]mt8193_video_config:%d\n", vformat);
 
@@ -311,7 +378,8 @@ void mt8193_set_mode(unsigned char ucMode)
 
 int mt8193_power_on(void)
 {
-	/*unsigned int dpi_pin_start = 0; */
+	struct device_node *dn;
+	int bus_switch_pin;
 
 	HDMI_DEF_LOG("[hdmi]mt8193_power_on_\n");
 
@@ -321,7 +389,7 @@ int mt8193_power_on(void)
 	}
 	hdmi_powerenable = 1;
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)  || defined(CONFIG_PM_AUTOSLEEP)
+#if defined(CONFIG_HAS_EARLYSUSPEND)
 	if (mt8193_hdmiearlysuspend == 0)
 		return 0;
 #endif
@@ -334,6 +402,10 @@ int mt8193_power_on(void)
 	mt_set_gpio_out(GPIO_HDMI_POWER_CONTROL, GPIO_OUT_ONE);
 	HDMI_DEF_LOG("[hdmi]hdmi_5v_on\n");
 #endif
+
+	dn = of_find_compatible_node(NULL, NULL, "mediatek,mt8193-hdmi");
+	bus_switch_pin = of_get_named_gpio(dn, "hdmi_power_gpios", 0);
+	gpio_direction_output(bus_switch_pin, 1);
 
 	vWriteHdmiSYSMsk(HDMI_PWR_CTRL, hdmi_power_turnon, hdmi_power_turnon);
 	vWriteHdmiSYSMsk(HDMI_SYS_PWR_RST_B, hdmi_pwr_sys_sw_unreset, hdmi_pwr_sys_sw_unreset);
@@ -358,16 +430,20 @@ int mt8193_power_on(void)
 
 void mt8193_power_off(void)
 {
+	struct device_node *dn;
+	int bus_switch_pin;
+
 	HDMI_DEF_LOG("[hdmi]mt8193_power_off\n");
 	if (hdmi_powerenable == 0) {
 		HDMI_DEF_LOG("[hdmi]already power off, return\n");
 		return;
 	}
 	hdmi_powerenable = 0;
+	is_hdmi_plug_out_flag = 1;
 
 	mt8193_hotinit = 1;
 	mt8193_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
-#if defined(CONFIG_HAS_EARLYSUSPEND)  || defined(CONFIG_PM_AUTOSLEEP)
+#if defined(CONFIG_HAS_EARLYSUSPEND)
 	if (mt8193_hdmiearlysuspend == 1)
 		is_hdmi_plug_out_flag = 1;
 	else
@@ -383,6 +459,10 @@ void mt8193_power_off(void)
 	mt_set_gpio_out(GPIO_HDMI_POWER_CONTROL, GPIO_OUT_ZERO);
 	HDMI_DEF_LOG("[hdmi]hdmi_5v_off\n");
 #endif
+
+	dn = of_find_compatible_node(NULL, NULL, "mediatek,mt8193-hdmi");
+	bus_switch_pin = of_get_named_gpio(dn, "hdmi_power_gpios", 0);
+	gpio_direction_output(bus_switch_pin, 0);
 
 	vWriteHdmiSYSMsk(HDMI_PWR_CTRL, hdmi_clock_off, hdmi_clock_off);
 	vWriteHdmiSYSMsk(HDMI_PWR_CTRL, hdmi_iso_en, hdmi_iso_en);
@@ -533,52 +613,6 @@ static struct early_suspend mt8193_hdmi_early_suspend_desc = {
 	.resume = mt8193_hdmi_late_resume,
 };
 #endif
-#if defined(CONFIG_PM_AUTOSLEEP)
-static void mt8193_hdmi_early_suspend(void)
-{
-	MT8193_PLUG_FUNC();
-	mt8193_hdmiearlysuspend = 0;
-	is_hdmi_plug_out_flag = 0;
-}
-
-static void mt8193_hdmi_late_resume(void)
-{
-	MT8193_PLUG_FUNC();
-	mt8193_hdmiearlysuspend = 1;
-}
-
-static int mt8193_hdmi_fb_notifier_callback(struct notifier_block *self, unsigned long event, void *fb_evdata)
-{
-	struct fb_event *evdata = fb_evdata;
-	int blank;
-
-	if (event != FB_EVENT_BLANK)
-		return 0;
-
-	blank = *(int *)evdata->data;
-
-	switch (blank) {
-	case FB_BLANK_UNBLANK:
-	case FB_BLANK_NORMAL:
-		mt8193_hdmi_late_resume();
-		break;
-	case FB_BLANK_VSYNC_SUSPEND:
-	case FB_BLANK_HSYNC_SUSPEND:
-		break;
-	case FB_BLANK_POWERDOWN:
-		mt8193_hdmi_early_suspend();
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static struct notifier_block mt8193hdmi_fb_notif = {
-	.notifier_call = mt8193_hdmi_fb_notifier_callback,
-};
-#endif
 
 /*********************************************************
 		mt8193 debug
@@ -603,6 +637,7 @@ static void process_dbg_opt(const char *opt)
 	int temp_len = 0;
 	int len = 0;
 	int ret;
+	long int p_temp;
 
 	buf = (char *)opt;
 
@@ -676,7 +711,8 @@ static void process_dbg_opt(const char *opt)
 		hdmi_factory_mode_test(STEP1_CHIP_INIT, NULL);
 	} else if (0 == strncmp(opt, "fres:", 5)) {
 		ret = sscanf(buf + 5, "%x", &val);
-		hdmi_factory_mode_test(STEP3_START_DPI_AND_CONFIG, &val);
+		p_temp = (long int)val;
+		hdmi_factory_mode_test(STEP3_START_DPI_AND_CONFIG, (void *)p_temp);
 	} else {
 		HDMI_ATTR_SPRINTF("---hdmi debug help---\n");
 		HDMI_ATTR_SPRINTF("please go in to sys/kernel/debug\n");
@@ -782,9 +818,10 @@ static void vNotifyAppHdmiState(unsigned char u1hdmistate)
 	HDMI_EDID_T get_info;
 
 	mt8193_AppGetEdidInfo(&get_info);
-
+#if 0
 	if (mt8193_hdmi_factory_callback != NULL)
 		mt8193_hdmi_factory_callback(HDMI_STATE_NO_DEVICE);
+#endif
 
 	switch (u1hdmistate) {
 	case HDMI_PLUG_OUT:
@@ -912,7 +949,7 @@ void hdmi_timer_impl(void)
 	if (mt8193_hotinit != 1)
 		mt8193_hdmiinit++;
 
-#if defined(CONFIG_HAS_EARLYSUSPEND) || defined(CONFIG_PM_AUTOSLEEP)
+#if defined(CONFIG_HAS_EARLYSUSPEND)
 	if (mt8193_hdmiearlysuspend == 1) {
 #else
 	{
@@ -1045,7 +1082,7 @@ void mt8193_nlh_impl(void)
 
 static int hdmi_timer_kthread(void *data)
 {
-	struct sched_param param = {.sched_priority = RTPM_PRIO_CAMERA_PREVIEW };
+	struct sched_param param = {.sched_priority = 91};
 
 	sched_setscheduler(current, SCHED_RR, &param);
 
@@ -1062,7 +1099,7 @@ static int hdmi_timer_kthread(void *data)
 
 static int cec_timer_kthread(void *data)
 {
-	struct sched_param param = {.sched_priority = RTPM_PRIO_CAMERA_PREVIEW };
+	struct sched_param param = {.sched_priority = 91};
 
 	sched_setscheduler(current, SCHED_RR, &param);
 
@@ -1079,7 +1116,7 @@ static int cec_timer_kthread(void *data)
 
 static int mt8193_nlh_kthread(void *data)
 {
-	struct sched_param param = {.sched_priority = RTPM_PRIO_SCRN_UPDATE };
+	struct sched_param param = {.sched_priority = 94};
 
 	sched_setscheduler(current, SCHED_RR, &param);
 
@@ -1145,9 +1182,6 @@ void cec_poll_isr(unsigned long n)
 
 static int mt8193_init(void)
 {
-#if defined(CONFIG_PM_AUTOSLEEP)
-	int ret;
-#endif
 
 	HDMI_DEF_LOG("[hdmi]mt8193_init\n");
 
@@ -1165,13 +1199,6 @@ static int mt8193_init(void)
 
 #if defined(CONFIG_HAS_EARLYSUSPEND)
 	register_early_suspend(&mt8193_hdmi_early_suspend_desc);
-#endif
-#if defined(CONFIG_PM_AUTOSLEEP)
-	ret = fb_register_client(&mt8193hdmi_fb_notif);
-	if (ret) {
-		pr_err("fail to register fb notifier, ret=%d\n", ret);
-		return ret;
-	}
 #endif
 
 	memset((void *)&r_hdmi_timer, 0, sizeof(r_hdmi_timer));

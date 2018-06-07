@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -12,7 +25,6 @@
 #include <linux/spinlock.h>
 #include <linux/seq_file.h>
 #include "mt-plat/mtk_thermal_monitor.h"
-#include "mtk_thermal_typedefs.h"
 #include "mach/mt_thermal.h"
 #include <linux/uidgid.h>
 #include <linux/slab.h>
@@ -335,7 +347,10 @@ static ssize_t tsallts_write(struct file *file, const char __user *buffer, size_
 			thz_dev = NULL;
 		}
 
-		if (num_trip < 0) {
+		if (num_trip < 0 || num_trip > 10) {
+			aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "tsallts_write5",
+					"Bad argument");
+			tsallts_dprintk("[tsallts_write5] bad argument\n");
 			kfree(ptr_temp_data);
 			return -EINVAL;
 		}
@@ -396,6 +411,8 @@ static ssize_t tsallts_write(struct file *file, const char __user *buffer, size_
 	}
 
 	tsallts_dprintk("[tsallts_write1] bad argument\n");
+	aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "tsallts_write5",
+			"Bad argument");
 	kfree(ptr_temp_data);
 	return -EINVAL;
 }

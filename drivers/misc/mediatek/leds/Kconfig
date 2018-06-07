@@ -13,5 +13,11 @@ config LIGHTNESS_MAPPING_VALUE
  	---help---
 	  Backlight brightness mapping value, from 0 to 255.
 
-config TB8173_EVB
-	bool "Support TB8173 EVB board"
+config BACKLIGHT_SUPPORT_LP8557
+	bool "Support backlight lp8557 board"
+
+config BACKLIGHT_SUPPORT_LM3697
+	bool "LM3697(DW8832) Support"
+	default n
+ 	---help---
+	  charge pump driver for external backlight

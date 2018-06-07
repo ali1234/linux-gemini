@@ -190,7 +190,7 @@ static u8 comfirm(void)
 			break;
 		}
 
-		mdelay(cmd_head.circle);
+		msleep(cmd_head.circle);
 	}
 
 	if (i >= cmd_head.times) {
@@ -212,13 +212,21 @@ Output:
 static ssize_t gt1x_tool_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
 {
 	u64 ret = 0;
+	u8 *pre_data_p;
+	u8 *post_data_p;
 
 	GTP_DEBUG_FUNC();
 	GTP_DEBUG_ARRAY((u8 *) buff, len);
 
+	pre_data_p = cmd_head.data;
 	ret = copy_from_user(&cmd_head, buff, CMD_HEAD_LENGTH);
 	if (ret)
 		GTP_ERROR("copy_from_user failed.");
+	post_data_p = cmd_head.data;
+	if (pre_data_p != post_data_p) {
+		GTP_ERROR("pointer is overwritten! %p, %p, %p, %p, %dx\n",
+			pre_data_p, post_data_p, &cmd_head, &cmd_head.data, (int)CMD_HEAD_LENGTH);
+	}
 
 	GTP_DEBUG("wr  :0x%02x.", cmd_head.wr);
 	/*
@@ -274,7 +282,7 @@ static ssize_t gt1x_tool_write(struct file *filp, const char __user *buff, size_
 		}
 
 		if (cmd_head.delay)
-			mdelay(cmd_head.delay);
+			msleep(cmd_head.delay);
 
 		return cmd_head.data_len + CMD_HEAD_LENGTH;
 	} else if (3 == cmd_head.wr) {	/*gt1x unused*/
@@ -318,6 +326,13 @@ static ssize_t gt1x_tool_write(struct file *filp, const char __user *buff, size_
 	} else if (13 == cmd_head.wr) {
 		gt1x_leave_update_mode();
 	} else if (15 == cmd_head.wr) {
+		if ((cmd_head.data == NULL)
+			|| (cmd_head.data_len >= DATA_LENGTH)
+			|| (cmd_head.data_len >= (len - CMD_HEAD_LENGTH))) {
+			GTP_ERROR("copy_from_user data out of range.");
+			return -EINVAL;
+		}
+
 		memset(cmd_head.data, 0, cmd_head.data_len + 1);
 		memcpy(cmd_head.data, &buff[CMD_HEAD_LENGTH], cmd_head.data_len);
 		GTP_DEBUG("update firmware, filename: %s", cmd_head.data);
@@ -387,7 +402,7 @@ static ssize_t gt1x_tool_read(struct file *filp, char __user *buffer, size_t cou
 		GTP_DEBUG("[READ] Length: %d", data_len);
 
 		if (cmd_head.delay)
-			mdelay(cmd_head.delay);
+			msleep(cmd_head.delay);
 
 		while (data_len > 0) {
 			len = data_len > DATA_LENGTH ? DATA_LENGTH : data_len;
@@ -431,3 +446,4 @@ static ssize_t gt1x_tool_read(struct file *filp, char __user *buffer, size_t cou
 	*ppos += cmd_head.data_len;
 	return cmd_head.data_len;
 }
+MODULE_LICENSE("GPL");

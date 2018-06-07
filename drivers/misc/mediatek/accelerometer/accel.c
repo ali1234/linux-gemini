@@ -1,6 +1,28 @@
+/*
+* Copyright (C) 2013 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 
 #include "inc/accel.h"
 #include "inc/accel_factory.h"
+
+/* sanford.lin add on 20160308 for get driver information */
+#define AEON_DEVICE_PROC_MANAGER
+#ifdef AEON_DEVICE_PROC_MANAGER
+#include <linux/proc_fs.h>
+#define ACCELEROMETER_PROC_NAME	"AEON_ACCELEROMETER"
+static struct proc_dir_entry *gsensor_proc_entry;
+static char *gsensor_name = NULL;
+#endif
+/* sanford.lin end on 20160308 */
 
 struct acc_context *acc_context_obj = NULL;
 
@@ -281,6 +303,7 @@ static ssize_t acc_show_enable_nodata(struct device *dev, struct device_attribut
 static ssize_t acc_store_enable_nodata(struct device *dev, struct device_attribute *attr,
 				       const char *buf, size_t count)
 {
+#ifndef CONFIG_MTK_SCP_SENSORHUB_V1
 	struct acc_context *cxt = NULL;
 
 	ACC_LOG("acc_store_enable nodata buf=%s\n", buf);
@@ -301,6 +324,7 @@ static ssize_t acc_store_enable_nodata(struct device *dev, struct device_attribu
 		ACC_ERR(" acc_store enable nodata cmd error !!\n");
 	}
 	mutex_unlock(&acc_context_obj->acc_op_mutex);
+#endif
 	return count;
 }
 
@@ -394,9 +418,15 @@ static ssize_t acc_show_sensordevnum(struct device *dev,
 	struct acc_context *cxt = NULL;
 	const char *devname = NULL;
 	int ret = 0;
+	struct input_handle *handle;
 
 	cxt = acc_context_obj;
-	devname = dev_name(&cxt->idev->dev);
+	list_for_each_entry(handle, &cxt->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
+    
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -406,10 +436,11 @@ static ssize_t acc_store_batch(struct device *dev, struct device_attribute *attr
 {
 	struct acc_context *cxt = NULL;
 
-	ACC_LOG("acc_store_batch buf=%s\n", buf);
+	/* ACC_LOG("acc_store_batch buf=%s\n", buf); */
 	mutex_lock(&acc_context_obj->acc_op_mutex);
 	cxt = acc_context_obj;
 	if (cxt->acc_ctl.is_support_batch) {
+		ACC_LOG("acc_store_batch buf=%s\n", buf);
 		if (!strncmp(buf, "1", 1)) {
 			cxt->is_batch_enable = true;
 			if (true == cxt->is_polling_run) {
@@ -436,7 +467,7 @@ static ssize_t acc_store_batch(struct device *dev, struct device_attribute *attr
 		ACC_LOG(" acc_store_batch mot supported\n");
 
 	mutex_unlock(&acc_context_obj->acc_op_mutex);
-	ACC_LOG(" acc_store_batch done: %d\n", cxt->is_batch_enable);
+	/* ACC_LOG(" acc_store_batch done: %d\n", cxt->is_batch_enable); */
 	return count;
 
 }
@@ -485,6 +516,49 @@ static struct platform_driver gsensor_driver = {
 		   }
 };
 
+/* sanford.lin add on 20160308 for get driver information */
+#ifdef AEON_DEVICE_PROC_MANAGER
+static ssize_t gsensor_proc_oem_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
+{
+	char *page = NULL;
+    char *ptr = NULL;
+	int len, err = -1;
+
+	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!page)
+	{
+		kfree(page);
+		return -ENOMEM;
+	}
+	ptr = page;
+
+	ptr += sprintf(ptr, "%s\n", gsensor_name);
+
+	len = ptr - page;
+	if(*ppos >= len)
+	{
+		kfree(page);
+		return 0;
+	}
+
+	err = copy_to_user(buffer,(char *)page,len);
+	*ppos += len;
+
+	if(err) 
+	{
+		kfree(page);
+		return err;
+	}
+	kfree(page);
+	return len;
+}
+
+static const struct file_operations gsensor_proc_fops = { 
+    .read = gsensor_proc_oem_read
+};
+#endif
+/* sanford.lin end on 20160308 */
+
 static int acc_real_driver_init(void)
 {
 	int i = 0;
@@ -499,6 +573,16 @@ static int acc_real_driver_init(void)
 			if (0 == err) {
 				ACC_LOG(" acc real driver %s probe ok\n",
 					gsensor_init_list[i]->name);
+			/* sanford.lin add on 20160308 for get driver information */
+			#ifdef AEON_DEVICE_PROC_MANAGER
+				gsensor_name = gsensor_init_list[i]->name;
+				gsensor_proc_entry = proc_create(ACCELEROMETER_PROC_NAME, 0777, NULL, &gsensor_proc_fops);
+				if (NULL == gsensor_proc_entry)
+				{
+					printk("proc_create %s failed\n", ACCELEROMETER_PROC_NAME);
+				}
+			#endif
+			/* sanford.lin end on 20160308 */
 				break;
 			}
 		}

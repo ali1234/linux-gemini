@@ -173,6 +173,24 @@ static struct device_attribute dev_scrub_size =
 	__ATTR(scrub_size, S_IRUGO, dev_attribute_show, NULL);
 static struct device_attribute dev_wl_th =
 	__ATTR(wl_th, 00755, dev_attribute_show, dev_attribute_store);
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+static struct device_attribute dev_archive_count =
+	__ATTR(archive_count, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_tlc_ec_count =
+	__ATTR(tlc_ec_count, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_tlc_mean_ec =
+	__ATTR(tlc_mean_ec, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_tlc_ec_sum =
+	__ATTR(tlc_ec_sum, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_tlc_min_ec =
+	__ATTR(tlc_min_ec, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_tlc_max_ec =
+	__ATTR(tlc_max_ec, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_mtbl_slots =
+	__ATTR(mtbl_slots, S_IRUGO, dev_attribute_show, NULL);
+static struct device_attribute dev_tlc_wl_th =
+	__ATTR(tlc_wl_th, 00755, dev_attribute_show, dev_attribute_store);
+#endif
 static struct device_attribute dev_torture =
 	__ATTR(torture, 00755, dev_attribute_show, NULL);
 /*MTK end*/
@@ -397,9 +415,18 @@ static ssize_t dev_attribute_store(struct device *dev, struct device_attribute *
 		int ret = kstrtoint(buf, 0, &th);
 
 		if (ret == 0) {
-			ubi_msg("set th=%d\n", th);
+			dbg_gen("set th=%d\n", th);
 			ubi->wl_th = th;
 		}
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	} else if (attr == &dev_tlc_wl_th) {
+		int ret = kstrtoint(buf, 0, &th);
+
+		if (ret == 0) {
+			dbg_gen("set tlc th=%d\n", th);
+			ubi->tlc_wl_th = th;
+		}
+#endif
 	}
 	return count;
 }
@@ -440,6 +467,40 @@ static ssize_t dev_attribute_show(struct device *dev,
 		ret = sprintf(buf, "torture: %d\n", ubi->torture);
 	else if (attr == &dev_wl_th)
 		ret = sprintf(buf, "wl_th: %d\n", ubi->wl_th);
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	else if (attr == &dev_archive_count)
+		ret = sprintf(buf, "archive_count: %d\n", ubi->archive_count);
+	else if (attr == &dev_tlc_max_ec)
+		ret = sprintf(buf, "tlc_max_ec: %d\n", ubi->tlc_max_ec);
+	else if (attr == &dev_tlc_ec_count)
+		ret = sprintf(buf, "tlc_ec_count: %d\n", atomic_read(&ubi->tlc_ec_count));
+	else if (attr == &dev_tlc_mean_ec)
+		ret = sprintf(buf, "tlc_mean_ec: %d\n", ubi->tlc_mean_ec);
+	else if (attr == &dev_tlc_ec_sum)
+		ret = sprintf(buf, "tlc_ec_sum: %lld\n", ubi->tlc_ec_sum);
+	else if (attr == &dev_mtbl_slots)
+		ret = sprintf(buf, "mtbl_slots: %d\n", ubi->mtbl_slots);
+	else if (attr == &dev_tlc_min_ec) {
+		struct ubi_wl_entry *e = NULL, *efree = NULL, *eused = NULL;
+
+		spin_lock(&ubi->wl_lock);
+		efree = rb_entry(rb_first(&ubi->tlc_free), struct ubi_wl_entry, u.rb);
+		eused = rb_entry(rb_first(&ubi->tlc_used), struct ubi_wl_entry, u.rb);
+		if (efree && eused) {
+			if (efree->ec < eused->ec)
+				e = efree;
+			else
+				e = eused;
+		} else if (efree) {
+			e = efree;
+		} else {
+			e = eused;
+		}
+		ret = sprintf(buf, "tlc_min_ec: %d\n", e->ec);
+		spin_unlock(&ubi->wl_lock);
+	} else if (attr == &dev_tlc_wl_th)
+		ret = sprintf(buf, "tlc_wl_th: %d\n", ubi->tlc_wl_th);
+#endif
 	else if (attr == &dev_wl_count)
 		ret = sprintf(buf, "wl_count: %d\n", ubi->wl_count);
 	else if (attr == &dev_wl_size)
@@ -548,6 +609,32 @@ static int ubi_sysfs_init(struct ubi_device *ubi, int *ref)
 	err = device_create_file(&ubi->dev, &dev_move_retry);
 	if (err)
 		return err;
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	err = device_create_file(&ubi->dev, &dev_archive_count);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_tlc_ec_count);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_tlc_mean_ec);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_tlc_ec_sum);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_tlc_min_ec);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_tlc_max_ec);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_mtbl_slots);
+	if (err)
+		return err;
+	err = device_create_file(&ubi->dev, &dev_tlc_wl_th);
+	if (err)
+		return err;
+#endif
 	err = device_create_file(&ubi->dev, &dev_ec_count);
 	if (err)
 		return err;
@@ -856,8 +943,8 @@ static int io_init(struct ubi_device *ubi, int max_beb_per1024)
 #ifdef CONFIG_MTK_COMBO_NAND_SUPPORT
 	ubi->max_write_size = COMBO_NAND_PAGE_SIZE;
 #endif
-#ifdef CONFIG_MTK_MLC_NAND_SUPPORT
-	ubi->max_write_size = ubi->mtd->erasesize/4;
+#if defined(CONFIG_MTK_MLC_NAND_SUPPORT) || defined(CONFIG_MTK_SLC_BUFFER_SUPPORT)
+	ubi->max_write_size = rounddown_pow_of_two(ubi->mtd->erasesize/4);
 #endif
 	/*
 	 * Maximum write size has to be greater or equivalent to min. I/O
@@ -940,7 +1027,7 @@ static int io_init(struct ubi_device *ubi, int max_beb_per1024)
 	ubi->leb_size = ubi->peb_size - ubi->leb_start;
 
 	if (!(ubi->mtd->flags & MTD_WRITEABLE)) {
-		ubi_msg("MTD device %d is write-protected, attach in read-only mode",
+		dbg_gen("MTD device %d is write-protected, attach in read-only mode",
 			ubi->mtd->index);
 		ubi->ro_mode = 1;
 	}
@@ -1007,7 +1094,7 @@ static int autoresize(struct ubi_device *ubi, int vol_id)
 	if (err)
 		return err;
 
-	ubi_msg("volume %d (\"%s\") re-sized from %d to %d LEBs", vol_id,
+	dbg_gen("volume %d (\"%s\") re-sized from %d to %d LEBs", vol_id,
 		vol->name, old_reserved_pebs, vol->reserved_pebs);
 	return 0;
 }
@@ -1101,6 +1188,10 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	ubi->autoresize_vol_id = -1;
 /*MTK start*/
 	ubi->wl_th = CONFIG_MTD_UBI_WL_THRESHOLD;
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	ubi->tlc_wl_th = 8;/*8, only TLC; CONFIG_MTD_UBI_WL_THRESHOLD/6; //CONFIG_MTD_UBI_TLC_WL_THRESHOLD*/
+	atomic_set(&ubi->tlc_ec_count, 0);
+#endif
 	atomic_set(&ubi->ec_count, 0);
 	atomic_set(&ubi->move_retry, 0);
 /*MTK end*/
@@ -1128,8 +1219,8 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 		ubi->fm_disabled = 1;
 	}
 
-	ubi_msg("default fastmap pool size: %d", ubi->fm_pool.max_size);
-	ubi_msg("default fastmap WL pool size: %d", ubi->fm_wl_pool.max_size);
+	dbg_gen("default fastmap pool size: %d", ubi->fm_pool.max_size);
+	dbg_gen("default fastmap WL pool size: %d", ubi->fm_wl_pool.max_size);
 #else
 	ubi->fm_disabled = 1;
 #endif
@@ -1141,8 +1232,10 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	spin_lock_init(&ubi->volumes_lock);
 	mutex_init(&ubi->fm_mutex);
 	init_rwsem(&ubi->fm_sem);
-
-	ubi_msg("attaching mtd%d to ubi%d", mtd->index, ubi_num);
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	mutex_init(&ubi->mtbl_mutex);
+#endif
+	dbg_gen("attaching mtd%d to ubi%d", mtd->index, ubi_num);
 
 	err = io_init(ubi, max_beb_per1024);
 	if (err)
@@ -1180,6 +1273,9 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 			goto out_detach;
 	}
 
+	/* Make device "available" before it becomes accessible via sysfs */
+	ubi_devices[ubi_num] = ubi;
+
 	err = uif_init(ubi, &ref);
 	if (err)
 		goto out_detach;
@@ -1198,23 +1294,23 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 
 	attach_time = sched_clock() - attach_time;
 	do_div(attach_time, 1000000);
-	ubi_msg("attached mtd%d (name \"%s\", size %llu MiB) to ubi%d",
+	dbg_gen("attached mtd%d (name \"%s\", size %llu MiB) to ubi%d",
 		mtd->index, mtd->name, ubi->flash_size >> 20, ubi_num);
-	ubi_msg("PEB size: %d bytes (%d KiB), LEB size: %d bytes",
+	dbg_gen("PEB size: %d bytes (%d KiB), LEB size: %d bytes",
 		ubi->peb_size, ubi->peb_size >> 10, ubi->leb_size);
-	ubi_msg("min./max. I/O unit sizes: %d/%d, sub-page size %d",
+	dbg_gen("min./max. I/O unit sizes: %d/%d, sub-page size %d",
 		ubi->min_io_size, ubi->max_write_size, ubi->hdrs_min_io_size);
-	ubi_msg("VID header offset: %d (aligned %d), data offset: %d",
+	dbg_gen("VID header offset: %d (aligned %d), data offset: %d",
 		ubi->vid_hdr_offset, ubi->vid_hdr_aloffset, ubi->leb_start);
-	ubi_msg("good PEBs: %d, bad PEBs: %d, corrupted PEBs: %d",
+	dbg_gen("good PEBs: %d, bad PEBs: %d, corrupted PEBs: %d",
 		ubi->good_peb_count, ubi->bad_peb_count, ubi->corr_peb_count);
-	ubi_msg("user volume: %d, internal volumes: %d, max. volumes count: %d",
+	dbg_gen("user volume: %d, internal volumes: %d, max. volumes count: %d",
 		ubi->vol_count - UBI_INT_VOL_COUNT, UBI_INT_VOL_COUNT,
 		ubi->vtbl_slots);
-	ubi_msg("max/mean erase counter: %d/%d, WL threshold: %d, image sequence number: %u",
+	dbg_gen("max/mean erase counter: %d/%d, WL threshold: %d, image sequence number: %u",
 		ubi->max_ec, ubi->mean_ec, CONFIG_MTD_UBI_WL_THRESHOLD,
 		ubi->image_seq);
-	ubi_msg("available PEBs: %d, total reserved PEBs: %d, PEBs reserved for bad PEB handling: %d",
+	dbg_gen("available PEBs: %d, total reserved PEBs: %d, PEBs reserved for bad PEB handling: %d",
 		ubi->avail_pebs, ubi->rsvd_pebs, ubi->beb_rsvd_pebs);
 
 	/*
@@ -1226,7 +1322,6 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	wake_up_process(ubi->bgt_thread);
 	spin_unlock(&ubi->wl_lock);
 
-	ubi_devices[ubi_num] = ubi;
 	ubi_notify_all(ubi, UBI_VOLUME_ADDED, NULL);
 	return ubi_num;
 
@@ -1237,12 +1332,17 @@ out_uif:
 	ubi_assert(ref);
 	uif_close(ubi);
 out_detach:
+	ubi_devices[ubi_num] = NULL;
 	ubi_wl_close(ubi);
 	ubi_free_internal_volumes(ubi);
 	vfree(ubi->vtbl);
 out_free:
 #ifndef CONFIG_UBI_SHARE_BUFFER
 	vfree(ubi->peb_buf);
+#endif
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	vfree(ubi->mtbl);
+	vfree(ubi->empty_mtbl_record);
 #endif
 	vfree(ubi->fm_buf);
 	if (ref)
@@ -1293,7 +1393,7 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
 
 	ubi_assert(ubi_num == ubi->ubi_num);
 	ubi_notify_all(ubi, UBI_VOLUME_REMOVED, NULL);
-	ubi_msg("detaching mtd%d from ubi%d", ubi->mtd->index, ubi_num);
+	dbg_gen("detaching mtd%d from ubi%d", ubi->mtd->index, ubi_num);
 #ifdef CONFIG_MTD_UBI_FASTMAP
 	/* If we don't write a new fastmap at detach time we lose all
 	 * EC updates that have been made since the last written fastmap. */
@@ -1319,15 +1419,19 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
 	ubi_free_internal_volumes(ubi);
 	vfree(ubi->vtbl);
 	put_mtd_device(ubi->mtd);
-#ifdef CONFIG_BLB
+#ifdef CONFIG_MTD_UBI_LOWPAGE_BACKUP
 	vfree(ubi->databuf);
 	vfree(ubi->oobbuf);
+#endif
+#ifdef CONFIG_MTK_SLC_BUFFER_SUPPORT
+	vfree(ubi->mtbl);
+	vfree(ubi->empty_mtbl_record);
 #endif
 #ifndef CONFIG_UBI_SHARE_BUFFER
 	vfree(ubi->peb_buf);
 #endif
 	vfree(ubi->fm_buf);
-	ubi_msg("mtd%d is detached from ubi%d", ubi->mtd->index, ubi->ubi_num);
+	dbg_gen("mtd%d is detached from ubi%d", ubi->mtd->index, ubi->ubi_num);
 	put_device(&ubi->dev);
 	return 0;
 }

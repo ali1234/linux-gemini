@@ -88,7 +88,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 				 * to ~3sec-8min depending on RTO.
 				 */
 
-#define TCP_RETR2	15	/*
+#define TCP_RETR2	10	/*
 				 * This should take at least
 				 * 90 minutes to time out.
 				 * RFC1122 says that the limit is 100 sec.
@@ -128,7 +128,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 #define TCP_DELACK_MIN	4U
 #define TCP_ATO_MIN	4U
 #endif
-#define TCP_RTO_MAX	((unsigned)(120*HZ))
+#define TCP_RTO_MAX	((unsigned)(60*HZ))
 #define TCP_RTO_MIN	((unsigned)(HZ/5))
 #define TCP_TIMEOUT_INIT ((unsigned)(1*HZ))	/* RFC6298 2.1 initial RTO value	*/
 #define TCP_TIMEOUT_FALLBACK ((unsigned)(3*HZ))	/* RFC 1122 initial RTO value, now
@@ -277,11 +277,12 @@ extern unsigned int sysctl_tcp_notsent_lowat;
 extern int sysctl_tcp_min_tso_segs;
 extern int sysctl_tcp_autocorking;
 extern int sysctl_tcp_default_init_rwnd;
-extern int sysctl_tcp_rto_min;
-extern int sysctl_tcp_rto_max;
+extern u32 sysctl_tcp_rto_min;
+extern u32 sysctl_tcp_rto_max;
 extern atomic_long_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
 extern int tcp_memory_pressure;
+extern int sysctl_tcp_ack_number;
 
 /*
  * The next routines deal with comparing 32 bit unsigned ints
@@ -1085,6 +1086,8 @@ static const char *statename[]={
 void tcp_set_state(struct sock *sk, int state);
 
 void tcp_done(struct sock *sk);
+
+int tcp_abort(struct sock *sk, int err);
 
 static inline void tcp_sack_reset(struct tcp_options_received *rx_opt)
 {

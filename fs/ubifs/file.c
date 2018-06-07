@@ -54,6 +54,7 @@
 #include <linux/mount.h>
 #include <linux/namei.h>
 #include <linux/slab.h>
+#include <linux/migrate.h>
 
 static int read_block(struct inode *inode, void *addr, unsigned int block,
 		      struct ubifs_data_node *dn)
@@ -266,6 +267,7 @@ static int write_begin_slow(struct address_space *mapping,
 			if (err) {
 				unlock_page(page);
 				page_cache_release(page);
+				ubifs_release_budget(c, &req);
 				return err;
 			}
 		}
@@ -1017,6 +1019,12 @@ static int ubifs_writepage(struct page *page, struct writeback_control *wbc)
 		inode->i_ino, page->index, page->flags);
 	ubifs_assert(PagePrivate(page));
 
+	if (((struct ubifs_info *)(inode->i_sb->s_fs_info))->ro_mount) {
+		dbg_gen("the volume has been changed to read-only mode.\n");
+		err = -EROFS;
+		goto out_unlock;
+	}
+
 	/* Is the page fully outside @i_size? (truncate in progress) */
 	if (page->index > end_index || (page->index == end_index && !len)) {
 		err = 0;
@@ -1427,6 +1435,26 @@ static int ubifs_set_page_dirty(struct page *page)
 	return ret;
 }
 
+#ifdef CONFIG_MIGRATION
+static int ubifs_migrate_page(struct address_space *mapping,
+		struct page *newpage, struct page *page, enum migrate_mode mode)
+{
+	int rc;
+
+	rc = migrate_page_move_mapping(mapping, newpage, page, NULL, mode, 0);
+	if (rc != MIGRATEPAGE_SUCCESS)
+		return rc;
+
+	if (PagePrivate(page)) {
+		ClearPagePrivate(page);
+		SetPagePrivate(newpage);
+	}
+
+	migrate_page_copy(newpage, page);
+	return MIGRATEPAGE_SUCCESS;
+}
+#endif
+
 static int ubifs_releasepage(struct page *page, gfp_t unused_gfp_flags)
 {
 	/*
@@ -1590,6 +1618,9 @@ const struct address_space_operations ubifs_file_address_operations = {
 	.write_end      = ubifs_write_end,
 	.invalidatepage = ubifs_invalidatepage,
 	.set_page_dirty = ubifs_set_page_dirty,
+#ifdef CONFIG_MIGRATION
+	.migratepage	= ubifs_migrate_page,
+#endif
 	.releasepage    = ubifs_releasepage,
 };
 

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /******************************************************************************
 *
  *
@@ -111,8 +124,7 @@ define for PCM settings
 #define Dl1_MIN_PERIOD_SIZE       1
 #define Dl1_MAX_PERIOD_SIZE     Dl1_MAX_BUFFER_SIZE
 
-/* #define Dl2_MAX_BUFFER_SIZE     (48*1024) */     /* for offload */
-#define Dl2_MAX_BUFFER_SIZE     (2*2048)            /* for fast */
+#define Dl2_MAX_BUFFER_SIZE     (48*1024)
 #define Dl2_MIN_PERIOD_SIZE       1
 #define Dl2_MAX_PERIOD_SIZE     Dl2_MAX_BUFFER_SIZE
 
@@ -217,5 +229,6 @@ unsigned long audio_frame_to_bytes(struct snd_pcm_substream *substream, unsigned
 unsigned long audio_bytes_to_frame(struct snd_pcm_substream *substream, unsigned long count);
 
 extern void *AFE_BASE_ADDRESS;
+extern int mtk_soc_always_hd;
 
 #endif

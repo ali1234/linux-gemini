@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include "cmdq_platform.h"
 #include "cmdq_core.h"
 #include "cmdq_reg.h"
@@ -16,7 +29,6 @@ const bool cmdq_core_support_sync_non_suspendable(void)
 
 const bool cmdq_core_support_wait_and_receive_event_in_same_tick(void)
 {
-#ifdef CMDQ_MT_CHIP_READY
 	enum chip_sw_ver ver = mt_get_chip_sw_ver();
 	bool support = false;
 
@@ -28,9 +40,6 @@ const bool cmdq_core_support_wait_and_receive_event_in_same_tick(void)
 	}
 
 	return support;
-#else
-	return false;
-#endif
 }
 
 const uint32_t cmdq_core_get_subsys_LSB_in_argA(void)

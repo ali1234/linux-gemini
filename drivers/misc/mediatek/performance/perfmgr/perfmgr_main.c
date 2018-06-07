@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/proc_fs.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -62,6 +75,10 @@ static int __init init_perfmgr(void)
 	hps_dir = proc_mkdir("perfmgr", NULL);
 #ifdef MTK_TOUCH_BOOST
 	init_perfmgr_touch();
+#endif
+
+#ifdef MTK_BOOST_SUPPORT
+	init_perfmgr_boost();
 #endif
 
 	return 0;

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
@@ -226,18 +239,6 @@ static ssize_t lastbus_test_show(struct device_driver *driver, char *buf)
 
 static ssize_t lastbus_test_store(struct device_driver *driver, const char *buf, size_t count)
 {
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-	char *p = (char *)buf;
-	unsigned long num = 0;
-
-	if (kstrtoul(p, 10, &num) != 0) {
-		pr_err("%s:%d: kstrtoul fail for %s\n", __func__, __LINE__, p);
-		return 0;
-	}
-
-	if (plt && plt->ops && (plt->ops->test(plt, num) != 0))
-		pr_err("%s:%d: test failed\n", __func__, __LINE__);
-
 	return count;
 }
 

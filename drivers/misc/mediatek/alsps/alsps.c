@@ -1,5 +1,29 @@
+/*
+* Copyright (C) 2013 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
+
 #include "inc/alsps.h"
 #include "inc/aal_control.h"
+
+/* sanford.lin add on 20160308 for get driver information */
+#define AEON_DEVICE_PROC_MANAGER
+#ifdef AEON_DEVICE_PROC_MANAGER
+#include <linux/proc_fs.h>
+#define ALPS_PROC_NAME	"AEON_ALPS"
+static struct proc_dir_entry *alsps_proc_entry;
+static char *alsps_name = NULL;
+#endif
+/* sanford.lin end on 20160308 */
+
 struct alsps_context *alsps_context_obj = NULL;
 struct platform_device *pltfm_dev;
 
@@ -70,7 +94,7 @@ static void als_work_func(struct work_struct *work)
 			goto als_loop;
 		}
 	}
-	ALSPS_LOG(" als data[%d]\n" , cxt->drv_data.als_data.values[0]);
+	/* ALSPS_LOG(" als data[%d]\n" , cxt->drv_data.als_data.values[0]); */
 	als_data_report(cxt->idev,
 	cxt->drv_data.als_data.values[0],
 	cxt->drv_data.als_data.status);
@@ -120,7 +144,7 @@ static void ps_work_func(struct work_struct *work)
 	}
 
 	if (cxt->is_get_valid_ps_data_after_enable == false) {
-		if (ALSPS_INVALID_VALUE != cxt->drv_data.als_data.values[0])
+		if (ALSPS_INVALID_VALUE != cxt->drv_data.ps_data.values[0])
 			cxt->is_get_valid_ps_data_after_enable = true;
 	}
 
@@ -196,7 +220,7 @@ static int als_real_enable(int enable)
 	if (1 == enable) {
 		if (true == cxt->is_als_active_data || true == cxt->is_als_active_nodata) {
 			err = cxt->als_ctl.enable_nodata(1);
-			if (err)
+			if (err) {
 				err = cxt->als_ctl.enable_nodata(1);
 				if (err) {
 					err = cxt->als_ctl.enable_nodata(1);
@@ -204,7 +228,8 @@ static int als_real_enable(int enable)
 						ALSPS_ERR("alsps enable(%d) err 3 timers = %d\n", enable, err);
 				}
 			}
-			ALSPS_LOG("alsps real enable\n");
+		}
+		ALSPS_LOG("alsps real enable\n");
 	}
 
 	if (0 == enable) {
@@ -482,8 +507,14 @@ static ssize_t als_show_devnum(struct device *dev,
 	unsigned int devnum;
 	const char *devname = NULL;
 	int ret;
+	struct input_handle *handle;
 
-	devname = dev_name(&alsps_context_obj->idev->dev);
+	list_for_each_entry(handle, &alsps_context_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
+
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -628,8 +659,14 @@ static ssize_t ps_show_devnum(struct device *dev,
 	unsigned int devnum;
 	const char *devname = NULL;
 	int ret;
+	struct input_handle *handle;
 
-	devname = dev_name(&alsps_context_obj->idev->dev);
+	list_for_each_entry(handle, &alsps_context_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
+
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -665,6 +702,49 @@ static struct platform_driver als_ps_driver = {
 	}
 };
 
+/* sanford.lin add on 20160308 for get driver information */
+#ifdef AEON_DEVICE_PROC_MANAGER
+static ssize_t alsps_proc_oem_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
+{
+	char *page = NULL;
+    char *ptr = NULL;
+	int len, err = -1;
+
+	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!page)
+	{
+		kfree(page);
+		return -ENOMEM;
+	}
+	ptr = page;
+
+	ptr += sprintf(ptr, "%s\n", alsps_name);
+
+	len = ptr - page;
+	if(*ppos >= len)
+	{
+		kfree(page);
+		return 0;
+	}
+
+	err = copy_to_user(buffer,(char *)page,len);
+	*ppos += len;
+
+	if(err)
+	{
+		kfree(page);
+		return err;
+	}
+	kfree(page);
+	return len;
+}
+
+static const struct file_operations alsps_proc_fops = { 
+    .read = alsps_proc_oem_read
+};
+#endif
+/* sanford.lin add on 20160308 */
+
 static int alsps_real_driver_init(void)
 {
 	int i = 0;
@@ -678,6 +758,16 @@ static int alsps_real_driver_init(void)
 			err = alsps_init_list[i]->init();
 			if (0 == err) {
 				ALSPS_LOG(" alsps real driver %s probe ok\n", alsps_init_list[i]->name);
+		/* sanford.lin add on 20160308 for get driver information */
+		#ifdef AEON_DEVICE_PROC_MANAGER
+		   alsps_name = alsps_init_list[i]->name;
+		   alsps_proc_entry = proc_create(ALPS_PROC_NAME, 0777, NULL, &alsps_proc_fops);
+		   if (NULL == alsps_proc_entry)
+		   {
+		   	printk("proc_create %s failed\n", ALPS_PROC_NAME);
+		   }
+		#endif
+		/* sanford.lin end on 20160308 */
 				break;
 			}
 		}

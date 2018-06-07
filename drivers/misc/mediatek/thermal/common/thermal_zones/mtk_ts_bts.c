@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -14,8 +27,8 @@
 #include <linux/writeback.h>
 #include <asm/uaccess.h>
 #include "mt-plat/mtk_thermal_monitor.h"
-#include "mtk_thermal_typedefs.h"
 #include "mach/mt_thermal.h"
+#include "mt-plat/mtk_thermal_platform.h"
 #include <linux/uidgid.h>
 #include <tmp_bts.h>
 #include <linux/slab.h>
@@ -103,8 +116,8 @@ static int my_open(char *fname, int flag)
 }
 */
 typedef struct {
-	INT32 BTS_Temp;
-	INT32 TemperatureR;
+	__s32 BTS_Temp;
+	__s32 TemperatureR;
 } BTS_TEMPERATURE;
 
 #define AUX_IN0_NTC (0)		/* NTC6301 */
@@ -456,12 +469,12 @@ BTS_TEMPERATURE BTS_Temperature_Table7[] = {
 
 
 /* convert register to temperature  */
-static INT16 mtkts_bts_thermistor_conver_temp(INT32 Res)
+static __s16 mtkts_bts_thermistor_conver_temp(__s32 Res)
 {
 	int i = 0;
 	int asize = 0;
-	INT32 RES1 = 0, RES2 = 0;
-	INT32 TAP_Value = -200, TMP1 = 0, TMP2 = 0;
+	__s32 RES1 = 0, RES2 = 0;
+	__s32 TAP_Value = -200, TMP1 = 0, TMP2 = 0;
 
 	asize = (sizeof(BTS_Temperature_Table) / sizeof(BTS_TEMPERATURE));
 	/* mtkts_bts_dprintk("mtkts_bts_thermistor_conver_temp() : asize = %d, Res = %d\n",asize,Res); */
@@ -503,11 +516,11 @@ static INT16 mtkts_bts_thermistor_conver_temp(INT32 Res)
 
 /* convert ADC_AP_temp_volt to register */
 /*Volt to Temp formula same with 6589*/
-static INT16 mtk_ts_bts_volt_to_temp(UINT32 dwVolt)
+static __s16 mtk_ts_bts_volt_to_temp(__u32 dwVolt)
 {
-	INT32 TRes;
-	INT32 dwVCriAP = 0;
-	INT32 BTS_TMP = -100;
+	__s32 TRes;
+	__s32 dwVCriAP = 0;
+	__s32 BTS_TMP = -100;
 
 	/* SW workaround----------------------------------------------------- */
 	/* dwVCriAP = (TAP_OVER_CRITICAL_LOW * 1800) / (TAP_OVER_CRITICAL_LOW + 39000); */
@@ -574,6 +587,7 @@ int ts_AP_at_boot_time = 0;
 int mtkts_bts_get_hw_temp(void)
 {
 	int t_ret = 0;
+	int t_ret2 = 0;
 
 	mutex_lock(&BTS_lock);
 
@@ -584,9 +598,12 @@ int mtkts_bts_get_hw_temp(void)
 
 	mutex_unlock(&BTS_lock);
 
-#if 0 /*def THERMAL_CATM_USER*/
-	wakeup_ta_algo(TA_CATMPLUS_TTJ);
-#endif
+
+	if (tsatm_thermal_get_catm_type() == 2)
+		t_ret2 = wakeup_ta_algo(TA_CATMPLUS_TTJ);
+
+	if (t_ret2)
+		pr_err("wakeup_ta_algo out of memory\n");
 
 	bts_cur_temp = t_ret;
 
@@ -807,7 +824,7 @@ static ssize_t mtkts_bts_write(struct file *file, const char __user *buffer, siz
 
 	if (sscanf
 	    (ptr_mtktsbts_data->desc,
-	     "%d %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d %d %s %d",
+	     "%d %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d",
 		&num_trip,
 		&ptr_mtktsbts_data->trip[0], &ptr_mtktsbts_data->t_type[0], ptr_mtktsbts_data->bind0,
 		&ptr_mtktsbts_data->trip[1], &ptr_mtktsbts_data->t_type[1], ptr_mtktsbts_data->bind1,
@@ -822,6 +839,14 @@ static ssize_t mtkts_bts_write(struct file *file, const char __user *buffer, siz
 		&ptr_mtktsbts_data->time_msec) == 32) {
 		mtkts_bts_dprintk("[mtkts_bts_write] mtkts_bts_unregister_thermal\n");
 		mtkts_bts_unregister_thermal();
+
+		if (num_trip < 0 || num_trip > 10) {
+			aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "mtkts_bts_write",
+					"Bad argument");
+			mtkts_bts_dprintk("[mtkts_bts_write] bad argument\n");
+			kfree(ptr_mtktsbts_data);
+			return -EINVAL;
+		}
 
 		for (i = 0; i < num_trip; i++)
 			g_THERMAL_TRIP[i] = ptr_mtktsbts_data->t_type[i];
@@ -875,6 +900,8 @@ static ssize_t mtkts_bts_write(struct file *file, const char __user *buffer, siz
 	}
 
 	mtkts_bts_dprintk("[mtkts_bts_write] bad argument\n");
+	aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "mtkts_bts_write",
+			"Bad argument");
 	kfree(ptr_mtktsbts_data);
 	return -EINVAL;
 }
@@ -991,7 +1018,7 @@ static ssize_t mtkts_bts_param_write(struct file *file, const char __user *buffe
 	mtkts_bts_dprintk("[mtkts_bts_write]\n");
 
 	if (sscanf
-	    (ptr_mtktsbts_parm_data->desc, "%s %d %s %d %s %d %s %d %d",
+	    (ptr_mtktsbts_parm_data->desc, "%9s %d %9s %d %15s %d %9s %d %d",
 		ptr_mtktsbts_parm_data->pull_R, &ptr_mtktsbts_parm_data->valR,
 		ptr_mtktsbts_parm_data->pull_V, &ptr_mtktsbts_parm_data->valV,
 		ptr_mtktsbts_parm_data->overcrilow, &ptr_mtktsbts_parm_data->over_cri_low,
@@ -1075,8 +1102,15 @@ void mtkts_bts_cancel_thermal_timer(void)
 	/* pr_debug("mtkts_bts_cancel_thermal_timer\n"); */
 
 	/* stop thermal framework polling when entering deep idle */
+
+	/*
+	   We cannot cancel the timer during deepidle and SODI, because
+	   the battery may suddenly heat up by 3A fast charging.
+	*/
+	/*
 	if (thz_dev)
 		cancel_delayed_work(&(thz_dev->poll_queue));
+	*/
 }
 
 
@@ -1084,8 +1118,10 @@ void mtkts_bts_start_thermal_timer(void)
 {
 	/* pr_debug("mtkts_bts_start_thermal_timer\n"); */
 	/* resume thermal framework polling when leaving deep idle */
+	/*
 	if (thz_dev != NULL && interval != 0)
 		mod_delayed_work(system_freezable_wq, &(thz_dev->poll_queue), round_jiffies(msecs_to_jiffies(3000)));
+	*/
 }
 
 static int mtkts_bts_register_thermal(void)
@@ -1147,7 +1183,6 @@ static const struct file_operations mtkts_AP_param_fops = {
 
 static int __init mtkts_bts_init(void)
 {
-	int err = 0;
 	struct proc_dir_entry *entry = NULL;
 	struct proc_dir_entry *mtkts_AP_dir = NULL;
 
@@ -1174,9 +1209,6 @@ static int __init mtkts_bts_init(void)
 	}
 
 	return 0;
-
-	/* mtkts_AP_unregister_cooler(); */
-	return err;
 }
 
 static void __exit mtkts_bts_exit(void)

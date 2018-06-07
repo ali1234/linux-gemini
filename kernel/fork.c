@@ -75,7 +75,6 @@
 #include <linux/aio.h>
 #include <linux/compiler.h>
 #ifdef CONFIG_MTPROF
-#include "mt_sched_mon.h"
 #include "mt_cputime.h"
 #endif
 #include <asm/pgtable.h>
@@ -959,6 +958,12 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	int retval;
 
 	tsk->min_flt = tsk->maj_flt = 0;
+
+	tsk->fm_flt = 0;
+#ifdef CONFIG_SWAP
+	tsk->swap_in = tsk->swap_out = 0;
+#endif
+
 	tsk->nvcsw = tsk->nivcsw = 0;
 #ifdef CONFIG_DETECT_HUNG_TASK
 	tsk->last_switch_count = tsk->nvcsw + tsk->nivcsw;
@@ -1253,7 +1258,7 @@ static void mt_init_thread_group(struct task_struct *p)
 	for (i = 0; i < num_cluster; i++) {
 		p->thread_group_info[i].cfs_nr_running = 0;
 		p->thread_group_info[i].nr_running = 0;
-		p->thread_group_info[i].load_avg_contrib = 0;
+		p->thread_group_info[i].loadwop_avg_contrib = 0;
 	}
 
 }
@@ -1780,6 +1785,7 @@ long do_fork(unsigned long clone_flags,
 
 		end = sched_clock();
 		dur = end - start;
+		trace_sched_fork_time(current, p, dur);
 		if (dur > WARN_FORK_DUR) {
 			pr_err("[%d:%s] fork [%d:%s] total fork time[%llu us] > 1s\n",
 			current->pid, current->comm, p->pid, p->comm, dur);
@@ -1789,8 +1795,6 @@ long do_fork(unsigned long clone_flags,
 		/* mt shceduler profiling*/
 		save_mtproc_info(p, sched_clock());
 #endif
-		/* mt throttle monitor */
-		save_mt_rt_mon_info(p, sched_clock());
 #endif
 		wake_up_new_task(p);
 
@@ -1921,13 +1925,21 @@ static int check_unshare_flags(unsigned long unshare_flags)
 				CLONE_NEWUSER|CLONE_NEWPID))
 		return -EINVAL;
 	/*
-	 * Not implemented, but pretend it works if there is nothing to
-	 * unshare. Note that unsharing CLONE_THREAD or CLONE_SIGHAND
-	 * needs to unshare vm.
+	 * Not implemented, but pretend it works if there is nothing
+	 * to unshare.  Note that unsharing the address space or the
+	 * signal handlers also need to unshare the signal queues (aka
+	 * CLONE_THREAD).
 	 */
 	if (unshare_flags & (CLONE_THREAD | CLONE_SIGHAND | CLONE_VM)) {
-		/* FIXME: get_task_mm() increments ->mm_users */
-		if (atomic_read(&current->mm->mm_users) > 1)
+		if (!thread_group_empty(current))
+			return -EINVAL;
+	}
+	if (unshare_flags & (CLONE_SIGHAND | CLONE_VM)) {
+		if (atomic_read(&current->sighand->count) > 1)
+			return -EINVAL;
+	}
+	if (unshare_flags & CLONE_VM) {
+		if (!current_is_single_threaded())
 			return -EINVAL;
 	}
 
@@ -1996,15 +2008,15 @@ SYSCALL_DEFINE1(unshare, unsigned long, unshare_flags)
 	if (unshare_flags & CLONE_NEWUSER)
 		unshare_flags |= CLONE_THREAD | CLONE_FS;
 	/*
-	 * If unsharing a thread from a thread group, must also unshare vm.
-	 */
-	if (unshare_flags & CLONE_THREAD)
-		unshare_flags |= CLONE_VM;
-	/*
 	 * If unsharing vm, must also unshare signal handlers.
 	 */
 	if (unshare_flags & CLONE_VM)
 		unshare_flags |= CLONE_SIGHAND;
+	/*
+	 * If unsharing a signal handlers, must also unshare the signal queues.
+	 */
+	if (unshare_flags & CLONE_SIGHAND)
+		unshare_flags |= CLONE_THREAD;
 	/*
 	 * If unsharing namespace, must also unshare filesystem information.
 	 */
